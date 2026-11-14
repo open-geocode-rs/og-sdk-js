@@ -211,7 +211,7 @@ export class APIPromise<T> extends Promise<T> {
     return this.#parsed;
   }
 
-  // APIPromise is a Promise, so it must define then(), as the OpenAI SDK's APIPromise does.
+  // APIPromise is a Promise, so it must define then().
   // oxlint-disable-next-line unicorn/no-thenable
   override then<A = T, B = never>(
     onfulfilled?: ((value: T) => A | PromiseLike<A>) | null,
@@ -233,7 +233,7 @@ export class APIPromise<T> extends Promise<T> {
   }
 }
 
-/** Adds og's request ID to a parsed object as `_request_id`, not enumerable, as the OpenAI SDK does. */
+/** Adds og's request ID to a parsed object as `_request_id`, not enumerable. */
 export function withRequestId<T>(data: T, response: Response): T {
   if (data !== null && typeof data === "object") {
     Object.defineProperty(data, "_request_id", {
