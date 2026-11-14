@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": { "@open-geocode/client": ["./packages/client/src/index.ts"] }
+  },
+  "include": ["packages/*/src", "packages/*/test"]
+}

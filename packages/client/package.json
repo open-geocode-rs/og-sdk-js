@@ -1,0 +1,26 @@
+{
+  "name": "@open-geocode/client",
+  "version": "0.0.0",
+  "description": "Typed client for the open-geocode API. No runtime dependencies.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-geocode-rs/og-sdk-js.git",
+    "directory": "packages/client"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown"
+  }
+}

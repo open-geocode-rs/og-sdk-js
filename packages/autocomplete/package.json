@@ -1,0 +1,34 @@
+{
+  "name": "@open-geocode/autocomplete",
+  "version": "0.0.0",
+  "description": "Drop-in address and place autocomplete for open-geocode, as a Web Component.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-geocode-rs/og-sdk-js.git",
+    "directory": "packages/autocomplete"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/og-autocomplete.iife.js"
+  ],
+  "unpkg": "./dist/og-autocomplete.iife.js",
+  "jsdelivr": "./dist/og-autocomplete.iife.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@open-geocode/client": "workspace:*"
+  }
+}

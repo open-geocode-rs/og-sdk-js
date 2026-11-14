@@ -1,0 +1,33 @@
+{
+  "name": "og-sdk-js",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "gen": "openapi-typescript https://raw.githubusercontent.com/open-geocode-rs/open-geocode/main/contract/openapi.json -o packages/client/src/schema.gen.ts",
+    "build": "bun run --filter '@open-geocode/client' build && bun run --filter '@open-geocode/autocomplete' build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "test": "vitest run --project client",
+    "test:browser": "vitest run --project autocomplete",
+    "changeset": "changeset",
+    "release": "bun run build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@types/node": "^26.6.6",
+    "@vitest/browser-playwright": "^5.1.0",
+    "openapi-typescript": "^7.13.0",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
+    "playwright": "^1.65.1",
+    "tsdown": "^0.23.7",
+    "typescript": "~6.0.3",
+    "unrun": "^0.3.1",
+    "vitest": "^5.1.0"
+  }
+}

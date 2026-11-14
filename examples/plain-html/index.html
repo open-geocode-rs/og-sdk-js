@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>og autocomplete example</title>
+    <!-- After the first release this can load from a CDN instead:
+         https://cdn.jsdelivr.net/npm/@open-geocode/autocomplete/dist/og-autocomplete.iife.js -->
+    <script src="../../packages/autocomplete/dist/og-autocomplete.iife.js"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 32rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      og-autocomplete::part(input) {
+        border: 1px solid #888;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="checkout">
+      <label for="address">Delivery address</label>
+      <og-autocomplete
+        id="address"
+        name="address"
+        base-url="http://127.0.0.1:8080"
+        placeholder="Start typing an address"
+      ></og-autocomplete>
+      <button>Continue</button>
+    </form>
+    <pre id="picked"></pre>
+    <script>
+      document.getElementById("address").addEventListener("og-select", (event) => {
+        const [lon, lat] = event.detail.geometry.coordinates;
+        document.getElementById("picked").textContent =
+          `${event.detail.properties.label}\n${lat}, ${lon}`;
+      });
+    </script>
+  </body>
+</html>
