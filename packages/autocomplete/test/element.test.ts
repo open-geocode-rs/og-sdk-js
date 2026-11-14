@@ -50,7 +50,9 @@ describe("<og-autocomplete>", () => {
   it("asks og as the user types and lists the suggestions", async () => {
     const { el, input } = await mount();
     await type(input, "10 King");
-    expect(String(fetch.mock.calls[0]![0])).toContain("/autocomplete?q=10+King");
+    const url = new URL(String(fetch.mock.calls[0]![0]));
+    expect(url.pathname).toBe("/autocomplete");
+    expect(url.searchParams.get("q")).toBe("10 King");
     const options = el.shadowRoot!.querySelectorAll("li");
     expect([...options].map((o) => o.textContent)).toEqual([
       "10 King St W, Toronto",

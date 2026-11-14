@@ -1,0 +1,24 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["packages/client", "packages/autocomplete-core", "packages/autocomplete"],
+  "entryPointStrategy": "packages",
+  "packageOptions": {
+    "entryPoints": ["src/index.ts"],
+    "blockTags": [
+      "@description",
+      "@param",
+      "@returns",
+      "@remarks",
+      "@example",
+      "@deprecated",
+      "@default",
+      "@see",
+      "@throws",
+      "@typeParam"
+    ]
+  },
+  "out": "docs",
+  "name": "og-sdk-js",
+  "excludePrivate": true,
+  "treatWarningsAsErrors": true
+}

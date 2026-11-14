@@ -1,0 +1,10 @@
+{
+  "name": "ecosystem-test-vite",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@open-geocode/autocomplete": "workspace:*",
+    "@open-geocode/autocomplete-core": "workspace:*",
+    "@open-geocode/client": "workspace:*"
+  }
+}

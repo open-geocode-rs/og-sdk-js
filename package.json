@@ -2,32 +2,62 @@
   "name": "og-sdk-js",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "ecosystem-tests/*"
   ],
   "type": "module",
   "scripts": {
     "gen": "openapi-typescript https://raw.githubusercontent.com/open-geocode-rs/open-geocode/main/contract/openapi.json -o packages/client/src/schema.gen.ts",
-    "build": "bun run --filter '@open-geocode/client' build && bun run --filter '@open-geocode/autocomplete' build",
+    "build": "bun run --filter '@open-geocode/client' build && bun run --filter '@open-geocode/autocomplete-core' build && bun run --filter '@open-geocode/autocomplete' build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "test": "vitest run --project client",
+    "test": "vitest run --project client --project autocomplete-core",
     "test:browser": "vitest run --project autocomplete",
     "changeset": "changeset",
-    "release": "bun run build && changeset publish"
+    "release": "bun run build && changeset publish",
+    "check:packages": "for p in packages/*; do bunx publint $p --strict && bunx attw --pack $p --profile esm-only || exit 1; done",
+    "size": "size-limit",
+    "docs": "typedoc",
+    "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@changesets/cli": "^3.0.3",
+    "@size-limit/preset-small-lib": "^14.3.0",
     "@types/node": "^26.6.6",
     "@vitest/browser-playwright": "^5.1.0",
     "openapi-typescript": "^7.13.0",
     "oxfmt": "^0.78.0",
     "oxlint": "^1.93.0",
     "playwright": "^1.65.1",
+    "publint": "^0.3.25",
+    "size-limit": "^14.3.0",
     "tsdown": "^0.23.7",
+    "typedoc": "^0.28.20",
     "typescript": "~6.0.3",
     "unrun": "^0.3.1",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
-  }
+  },
+  "size-limit": [
+    {
+      "name": "@open-geocode/client",
+      "path": "packages/client/dist/index.js",
+      "import": "{ createClient }",
+      "limit": "3 kB"
+    },
+    {
+      "name": "@open-geocode/autocomplete-core",
+      "path": "packages/autocomplete-core/dist/index.js",
+      "import": "{ createAutocomplete }",
+      "limit": "1.5 kB"
+    },
+    {
+      "name": "@open-geocode/autocomplete (CDN file)",
+      "path": "packages/autocomplete/dist/og-autocomplete.iife.js",
+      "limit": "6 kB"
+    }
+  ]
 }

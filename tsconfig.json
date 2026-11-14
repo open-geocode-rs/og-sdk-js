@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "paths": { "@open-geocode/client": ["./packages/client/src/index.ts"] }
+    "paths": {
+      "@open-geocode/client": ["./packages/client/src/index.ts"],
+      "@open-geocode/autocomplete-core": ["./packages/autocomplete-core/src/index.ts"]
+    }
   },
   "include": ["packages/*/src", "packages/*/test"]
 }

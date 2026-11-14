@@ -22,6 +22,14 @@ jobs:
       - run: bun run typecheck
       - run: bun run build
       - run: bun run test
+      - name: Package checks (publint, are-the-types-wrong)
+        run: bun run check:packages
+      - name: Size budget
+        run: bun run size
+      - name: API reference builds without warnings
+        run: bun run docs
+      - name: Bundles in a real Vite app
+        run: bun run test:ecosystem
       - name: Install browsers
         run: bunx playwright install --with-deps chromium firefox webkit
       - run: bun run test:browser

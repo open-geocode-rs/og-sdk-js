@@ -13,6 +13,13 @@ export default defineConfig({
       },
       {
         test: {
+          name: "autocomplete-core",
+          include: ["packages/autocomplete-core/test/**/*.test.ts"],
+          environment: "node",
+        },
+      },
+      {
+        test: {
           name: "autocomplete",
           include: ["packages/autocomplete/test/**/*.test.ts"],
           browser: {
