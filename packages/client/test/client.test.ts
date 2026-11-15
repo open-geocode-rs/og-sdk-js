@@ -272,20 +272,22 @@ describe("logging", () => {
   });
 });
 
-// Runs against a real og server when OG_URL is set, for example OG_URL=http://127.0.0.1:8080.
+// Runs against a real og server when OG_URL is set, for example OG_URL=http://127.0.0.1:8081.
+// OG_TEST_ADDRESS names an address the server's Pack holds.
+const liveQuery = process.env["OG_TEST_ADDRESS"] ?? "24 Sussex Drive Ottawa";
 const liveClient = () => createClient({ baseUrl: process.env["OG_URL"]! });
 
 describe.runIf(process.env["OG_URL"])("against a live og", () => {
   it("geocodes an address and returns the request id", async () => {
-    const result = await liveClient().geocode({ q: "24 Sussex Drive Ottawa", limit: 1 });
-    expect(result.features[0]!.properties.label).toMatch(/Sussex/);
+    const result = await liveClient().geocode({ q: liveQuery, limit: 1 });
+    expect(result.features[0]!.properties.label).toBeTruthy();
     expect(result._request_id).toBeTruthy();
   });
 
   it("runs a batch job end to end", async () => {
     const client = liveClient();
     const created = await client.jobs.create(
-      { jsonl: '{"q":"24 Sussex Drive Ottawa"}\n' },
+      { jsonl: `${JSON.stringify({ q: liveQuery })}\n` },
       { endpoint: "geocode" },
     );
     const final = await client.jobs.wait(created.id, { interval: 200 });

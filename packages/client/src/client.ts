@@ -1,5 +1,5 @@
 /**
- * Typed client for the open-geocode API.
+ * Typed client for og's native API.
  *
  * Request and response types come from og's OpenAPI contract
  * (`contract/openapi.json`), generated into `schema.gen.ts` by `bun run gen`.
@@ -14,17 +14,6 @@ import {
   withRequestId,
 } from "./core.ts";
 import type { components, operations } from "./schema.gen.ts";
-
-export type { components, operations, paths } from "./schema.gen.ts";
-export {
-  APIPromise,
-  retryDelay,
-  type Logger,
-  type LogLevel,
-  type RequestOptions,
-  type WithResponse,
-} from "./core.ts";
-export * from "./errors.ts";
 
 /** Every parameter optional and allowed to be `undefined`, which is then left out of the request. */
 type Loose<T> = { [K in keyof T]?: T[K] | undefined };
