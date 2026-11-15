@@ -53,7 +53,7 @@ export function failover(options: FailoverOptions): Plugin {
           error = GeocoderError.from(thrown, { provider: from.id, operation: call.operation });
           if (to === undefined || error.code === "aborted" || !when(error, call)) throw error;
         }
-        // `to` is defined here: both branches above leave the loop without it.
+        // `to` is defined here, since both branches above leave the loop without it.
         const target = to as Adapter;
         options.onFailover?.({ from, to: target, error, call });
         from = target;

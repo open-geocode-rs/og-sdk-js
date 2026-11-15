@@ -34,7 +34,7 @@ function stable(value: unknown): string {
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stable(entry)}`).join(",")}}`;
 }
 
-/** The default cache key: provider, operation and the whole request, except its `session`. */
+/** The default cache key, made of the provider, the operation and the whole request except its `session`. */
 export function cacheKey(call: PluginCall): string {
   const { session: _session, ...request } = call.request;
   return `${call.adapter.id}:${call.operation}:${stable(request)}`;
