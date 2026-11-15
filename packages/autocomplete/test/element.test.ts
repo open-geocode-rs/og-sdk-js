@@ -1,11 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/index.ts";
+import { emptyAddress, Geocoder, type Adapter, type PlaceRecord } from "@open-geocode/client";
 import type { OgAutocomplete, OgSelectEvent } from "../src/index.ts";
 
 const feature = (label: string) => ({
   type: "Feature",
   geometry: { type: "Point", coordinates: [-79.38, 43.65] },
   properties: { id: `osm:node:${label.length}`, layer: "address", label, name: label },
+});
+
+const suggestion = (id: string, label: string, located: boolean): PlaceRecord => ({
+  id,
+  type: "address",
+  name: label,
+  label,
+  location: located ? { lat: 51.5, lon: -0.12 } : null,
+  accuracy: null,
+  confidence: null,
+  distance: null,
+  address: emptyAddress(),
 });
 
 let fetch: ReturnType<typeof vi.fn>;
@@ -77,9 +90,73 @@ describe("<og-autocomplete>", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
-    expect((await picked).detail.properties.label).toBe("10 King St E, Toronto");
+    const { detail } = await picked;
+    expect(detail.label).toBe("10 King St E, Toronto");
+    expect(detail.location).toEqual({ lat: 43.65, lon: -79.38 });
     expect(el.value).toBe("10 King St E, Toronto");
     expect(input.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("passes its attributes on as search options", async () => {
+    const { el, input } = await mount();
+    el.setAttribute("limit", "3");
+    el.setAttribute("country", "ca, us");
+    el.setAttribute("types", "address,street");
+    el.setAttribute("focus", "-79.38,43.65");
+    el.setAttribute("language", "fr");
+    await type(input, "10 King");
+    const url = new URL(String(fetch.mock.calls[0]![0]));
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      q: "10 King",
+      limit: "3",
+      country: "CA,US",
+      focus: "-79.38,43.65",
+      lang: "fr",
+    });
+  });
+
+  it("works with any adapter, and fetches coordinates a suggestion came without", async () => {
+    const sessions: (string | undefined)[] = [];
+    const fields = { options: ["limit", "session"], fields: ["id", "location"] } as const;
+    const vendor: Adapter = {
+      id: "vendor",
+      native: undefined,
+      capabilities: { autocomplete: { ...fields, coordinates: false }, lookup: fields },
+      async autocomplete(request) {
+        sessions.push(request.session);
+        return {
+          results: [suggestion("a", "1 High St, London", false)],
+          raw: null,
+          response: undefined,
+        };
+      },
+      async lookup(request) {
+        sessions.push(request.session);
+        return {
+          results: [suggestion(request.ids[0]!, "1 High St, London", true)],
+          raw: null,
+          response: undefined,
+        };
+      },
+    };
+    const el = document.createElement("og-autocomplete") as OgAutocomplete;
+    el.setAttribute("debounce", "0");
+    el.geocoder = new Geocoder({ adapter: vendor });
+    document.body.append(el);
+    const input = el.shadowRoot!.querySelector("input")!;
+    const picked = new Promise<OgSelectEvent>((resolve) =>
+      el.addEventListener("og-select", (e) => resolve(e as OgSelectEvent)),
+    );
+    await type(input, "1 High");
+    expect(fetch).not.toHaveBeenCalled();
+    el.shadowRoot!.querySelector("li")!.click();
+    const { detail } = await picked;
+    expect(detail.id).toBe("a");
+    expect(detail.location).toEqual({ lat: 51.5, lon: -0.12 });
+    // The keystroke and the lookup that ends the search share one session.
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).toBeTruthy();
+    expect(sessions[1]).toBe(sessions[0]);
   });
 
   it("submits the chosen label with its form", async () => {

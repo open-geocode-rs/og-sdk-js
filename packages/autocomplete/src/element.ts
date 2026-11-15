@@ -1,25 +1,21 @@
-import { createAutocomplete, type Autocomplete, type State } from "@open-geocode/autocomplete-core";
 import {
-  createClient,
-  type AutocompleteParams,
-  type Client,
-  type ForwardCollection,
-} from "@open-geocode/client";
+  createAutocomplete,
+  geocoderSource,
+  type Autocomplete,
+  type GeocoderSource,
+  type State,
+} from "@open-geocode/autocomplete-core";
+import { Geocoder, type Place, type PlaceType, type SearchOptions } from "@open-geocode/client";
+import { og } from "@open-geocode/client/og";
 
-/** One suggestion, as og returns it. */
-export type Suggestion = ForwardCollection["features"][number];
+/** One suggestion, in the unified format every adapter answers in. */
+export type Suggestion = Place;
 
-/** Fired when the user picks a suggestion. `detail` is the suggestion. */
+/** Fired when the user picks a suggestion. `detail` is the suggestion, with its coordinates. */
 export type OgSelectEvent = CustomEvent<Suggestion>;
 
-/** A `getItems` for `@open-geocode/autocomplete-core` that asks og's `/autocomplete`. */
-export function ogItems(
-  client: Client,
-  params: Omit<AutocompleteParams, "q"> = {},
-): (query: string, context: { signal: AbortSignal }) => Promise<Suggestion[]> {
-  return async (q, { signal }) =>
-    (await client.autocomplete({ ...params, q }, { signal })).features;
-}
+/** The search options the element passes on with every keystroke. */
+export type SuggestOptions = Omit<SearchOptions, "signal" | "session" | "include">;
 
 const STYLE = `
 :host { display: block; position: relative; font: inherit; }
@@ -32,12 +28,17 @@ li[aria-selected="true"] { background: Highlight; color: HighlightText; }
 `;
 
 /**
- * `<og-autocomplete>`: an input that suggests addresses and places from og as the user types.
+ * `<og-autocomplete>` is an input that suggests addresses and places as the user types.
  * Built on `@open-geocode/autocomplete-core`, which owns the state, keyboard and ARIA.
  *
- * Attributes: `base-url` (required), `placeholder`, `limit`, `country`, `layer`, `focus`,
+ * It asks og when `base-url` is set, or any provider when the `geocoder` property is set
+ * to a `Geocoder` built with that provider's adapter.
+ *
+ * Its attributes are `base-url`, `placeholder`, `limit`, `country` (comma-separated ISO codes),
+ * `types` (comma-separated result types), `focus` (`lon,lat`), `language`,
  * `debounce` (ms, default 150), `min-chars` (default 2), `name` (form field name).
- * Fires `og-select` with the chosen suggestion, and `og-error` when og fails.
+ * Fires `og-select` with the chosen suggestion, and `og-error` when the provider fails.
+ * A provider that suggests without coordinates is asked for them when the user picks.
  * Inside a `<form>`, its value is the chosen label.
  * Style it from outside with `::part(input)`, `::part(list)` and `::part(option)`.
  * While a search is slow, the host gets a `stalled` attribute for a spinner.
@@ -49,13 +50,20 @@ export class OgAutocomplete extends HTMLElement {
     "base-url",
     "debounce",
     "min-chars",
+    "limit",
+    "country",
+    "types",
+    "focus",
+    "language",
   ];
 
   readonly #internals: ElementInternals;
   readonly #input: HTMLInputElement;
   readonly #list: HTMLUListElement;
   #core: Autocomplete<Suggestion> | undefined;
-  #client: Client | undefined;
+  #geocoder: Geocoder | undefined;
+  #own: Geocoder | undefined;
+  #source: GeocoderSource<Suggestion> | undefined;
   #painted: Suggestion[] | undefined;
 
   constructor() {
@@ -87,12 +95,29 @@ export class OgAutocomplete extends HTMLElement {
   attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
     if (name === "placeholder") this.#input.placeholder = value ?? "";
     else {
-      // Rebuild with the new settings on the next keystroke.
-      if (name === "base-url") this.#client = undefined;
-      this.#core?.destroy();
-      this.#core = undefined;
-      this.#paint(this.#ensureCore().getState());
+      if (name === "base-url") this.#own = undefined;
+      this.#rebuild();
     }
+  }
+
+  /**
+   * The geocoder that answers. Set it to use any provider.
+   * When unset, the element asks the og server at `base-url`.
+   */
+  get geocoder(): Geocoder | undefined {
+    return this.#geocoder;
+  }
+
+  set geocoder(geocoder: Geocoder | undefined) {
+    this.#geocoder = geocoder;
+    this.#rebuild();
+  }
+
+  /** Rebuilds with the new settings, so the next keystroke uses them. */
+  #rebuild(): void {
+    this.#core?.destroy();
+    this.#core = undefined;
+    this.#paint(this.#ensureCore().getState());
   }
 
   disconnectedCallback(): void {
@@ -115,26 +140,42 @@ export class OgAutocomplete extends HTMLElement {
     return this.hasAttribute(name) && Number.isFinite(value) ? value : fallback;
   }
 
+  #options(): SuggestOptions {
+    const options: SuggestOptions = { limit: this.#number("limit", 5) };
+    const list = (name: string): string[] | undefined => {
+      const items = (this.getAttribute(name) ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      return items.length > 0 ? items : undefined;
+    };
+    const countries = list("country");
+    if (countries) options.countries = countries;
+    const types = list("types");
+    if (types) options.types = types as PlaceType[];
+    const language = list("language");
+    if (language) options.language = language;
+    const [lon, lat] = (list("focus") ?? []).map(Number);
+    if (lon !== undefined && lat !== undefined && Number.isFinite(lon) && Number.isFinite(lat))
+      options.focus = { lat, lon };
+    return options;
+  }
+
   #ensureCore(): Autocomplete<Suggestion> {
     if (this.#core) return this.#core;
-    const params: Omit<AutocompleteParams, "q"> = { limit: this.#number("limit", 5) };
-    for (const name of ["country", "layer", "focus"] as const) {
-      const value = this.getAttribute(name);
-      if (value) Object.assign(params, { [name]: value });
-    }
     const baseUrl = this.getAttribute("base-url");
-    if (baseUrl) this.#client ??= createClient({ baseUrl });
-    const client = this.#client;
-    this.#core = createAutocomplete<Suggestion>({
-      getItems: client ? ogItems(client, params) : async () => [],
-      getItemLabel: (item) => item.properties.label,
+    if (!this.#geocoder && baseUrl) this.#own ??= new Geocoder({ adapter: og({ baseUrl }) });
+    const geocoder = this.#geocoder ?? this.#own;
+    const source = geocoder ? geocoderSource(geocoder, this.#options()) : undefined;
+    this.#source = source;
+    const core = createAutocomplete<Suggestion>({
+      getItems: source ? source.getItems : async () => [],
+      getItemLabel: (item) => item.label,
       debounce: this.#number("debounce", 150),
       minLength: this.#number("min-chars", 2),
       onSelect: (item) => {
-        this.value = item.properties.label;
-        this.dispatchEvent(
-          new CustomEvent("og-select", { detail: item, bubbles: true, composed: true }),
-        );
+        this.value = item.label;
+        void this.#select(item, source);
       },
       onStateChange: (state) => {
         this.#paint(state);
@@ -142,7 +183,22 @@ export class OgAutocomplete extends HTMLElement {
           this.dispatchEvent(new CustomEvent("og-error", { detail: state.error }));
       },
     });
-    return this.#core;
+    this.#core = core;
+    return core;
+  }
+
+  /** Fires `og-select`, after fetching the coordinates of a suggestion that came without them. */
+  async #select(item: Suggestion, source: GeocoderSource<Suggestion> | undefined): Promise<void> {
+    let detail = item;
+    try {
+      if (source) detail = await source.resolve(item);
+    } catch (error) {
+      this.dispatchEvent(new CustomEvent("og-error", { detail: error }));
+      return;
+    }
+    // A newer geocoder or setting replaced this one while the lookup ran.
+    if (source !== this.#source) return;
+    this.dispatchEvent(new CustomEvent("og-select", { detail, bubbles: true, composed: true }));
   }
 
   #paint(state: State<Suggestion>): void {
@@ -162,7 +218,7 @@ export class OgAutocomplete extends HTMLElement {
           const li = document.createElement("li");
           li.setAttribute("part", "option");
           li.dataset["index"] = String(index);
-          li.textContent = item.properties.label;
+          li.textContent = item.label;
           return li;
         }),
       );

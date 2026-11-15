@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAutocomplete } from "../src/index.ts";
+import { createAutocomplete, geocoderSource, type SuggestionLike } from "../src/index.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -100,5 +100,64 @@ describe("createAutocomplete", () => {
     listener.mockClear();
     ac.close();
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+const item = (id: string, located: boolean) => ({
+  id,
+  label: `label ${id}`,
+  location: located ? { lat: 1, lon: 2 } : null,
+});
+const nothing = async (): Promise<{ results: SuggestionLike[] }> => ({ results: [] });
+
+describe("geocoderSource", () => {
+  it("feeds suggestions from any geocoder and passes the options on", async () => {
+    const autocomplete = vi.fn(async (_query: string, _options?: object) => ({
+      results: [item("a", true)],
+    }));
+    const source = geocoderSource({ autocomplete }, { limit: 3 });
+    const { signal } = new AbortController();
+    expect(await source.getItems("10 K", { signal })).toEqual([item("a", true)]);
+    expect(autocomplete.mock.calls[0]).toEqual([
+      "10 K",
+      { limit: 3, signal, session: expect.any(String) },
+    ]);
+    expect(source.getItemLabel(item("a", true))).toBe("label a");
+  });
+
+  it("keeps one session per search and ends it with the lookup", async () => {
+    const sessions: (string | undefined)[] = [];
+    const geocoder = {
+      autocomplete: async (_query: string, options?: { session?: string }) => {
+        sessions.push(options?.session);
+        return { results: [item("a", false)] };
+      },
+      lookup: vi.fn(async (id: string, options?: { session?: string }) => {
+        sessions.push(options?.session);
+        return { results: [item(id, true)] };
+      }),
+    };
+    const source = geocoderSource(geocoder);
+    const { signal } = new AbortController();
+    await source.getItems("1", { signal });
+    const [first] = await source.getItems("10", { signal });
+    expect(await source.resolve(first!)).toEqual(item("a", true));
+    await source.getItems("2", { signal });
+    expect(sessions[1]).toBe(sessions[0]);
+    expect(sessions[2]).toBe(sessions[0]);
+    expect(sessions[3]).not.toBe(sessions[0]);
+  });
+
+  it("does not look up a suggestion that already has coordinates, or has no id", async () => {
+    const lookup = vi.fn(nothing);
+    const source = geocoderSource({ autocomplete: nothing, lookup });
+    const located = item("a", true);
+    expect(await source.resolve(located)).toBe(located);
+    const anonymous = { id: null, label: "x", location: null };
+    expect(await source.resolve(anonymous)).toBe(anonymous);
+    expect(lookup).not.toHaveBeenCalled();
+    // A lookup that finds nothing leaves the suggestion as it was.
+    const missing = item("gone", false);
+    expect(await source.resolve(missing)).toBe(missing);
   });
 });

@@ -34,9 +34,8 @@
     <pre id="picked"></pre>
     <script>
       document.getElementById("address").addEventListener("og-select", (event) => {
-        const [lon, lat] = event.detail.geometry.coordinates;
-        document.getElementById("picked").textContent =
-          `${event.detail.properties.label}\n${lat}, ${lon}`;
+        const { lat, lon } = event.detail.location;
+        document.getElementById("picked").textContent = `${event.detail.label}\n${lat}, ${lon}`;
       });
     </script>
   </body>
