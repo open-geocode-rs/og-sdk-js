@@ -3,6 +3,7 @@ import {
   type AdapterBatchItem,
   type AdapterCapabilities,
   batchItem,
+  distance,
   oneLine,
   type OperationCapabilities,
   pool,
@@ -187,6 +188,10 @@ export class Geocoder<A extends Adapter = Adapter> {
       ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
     };
     const { batch, ...operations } = options.adapter.capabilities;
+    // The distance from a reverse point is measured here when the provider sends none.
+    const { reverse } = operations;
+    if (reverse?.fields.includes("location") && !reverse.fields.includes("distance"))
+      operations.reverse = { ...reverse, fields: [...reverse.fields, "distance"] };
     this.capabilities = {
       ...operations,
       batch: {
@@ -400,7 +405,12 @@ export class Geocoder<A extends Adapter = Adapter> {
           results:
             row === undefined || row.error !== undefined
               ? []
-              : shape(row.results, base.include, base.limit),
+              : shape(
+                  row.results,
+                  base.include,
+                  base.limit,
+                  operation === "reverse" ? (item as unknown as LatLon) : base.focus,
+                ),
           error: row?.error === undefined ? null : fail(row.error),
         };
       });
@@ -470,22 +480,36 @@ function prepare<R extends BaseRequest>(
       operation,
     });
   const fields = new Set<FieldName>(capabilities.fields);
+  // A distance can be measured wherever there is a location and a point to measure from.
+  if (fields.has("location") && origin(request) !== undefined) fields.add("distance");
   const unavailable = [...CORE_FIELDS, ...request.include].filter(
     (field) => field !== "raw" && !fields.has(field),
   );
   return { request: sent, unavailable, ignored };
 }
 
-/** Keeps the default fields and the ones asked for, and fills every gap with `null`. */
+/** The point distances are measured from, which is the reverse point, else the caller's `focus`. */
+function origin(request: BaseRequest): LatLon | undefined {
+  return (request as Partial<Requests["reverse"]>).point ?? request.focus;
+}
+
+/**
+ * Keeps the default fields and the ones asked for, and fills every gap with `null`.
+ * A result with a location but no distance of the provider's own gets the great-circle
+ * distance from `from`, which is geometry and not a guess.
+ */
 function shape(
   results: readonly PlaceRecord[],
   include: readonly Include[],
   limit: number | undefined,
+  from?: LatLon,
 ): PlaceRecord[] {
   const kept = limit === undefined ? results : results.slice(0, Math.max(0, limit));
   return kept.map((place) => {
     const out: Record<string, unknown> = {};
     for (const key of CORE_KEYS) out[key] = place[key] ?? null;
+    if (out["distance"] === null && from !== undefined && place.location)
+      out["distance"] = Math.round(distance(from, place.location) * 100) / 100;
     for (const key of include) out[key] = place[key] ?? null;
     return out as unknown as PlaceRecord;
   });
@@ -513,7 +537,12 @@ async function terminal(adapter: Adapter, call: PluginCall, strict: boolean): Pr
     const result: ResultEnvelope = {
       provider: adapter.id,
       operation,
-      results: shape(answer.results, call.request.include, call.request.limit),
+      results: shape(
+        answer.results,
+        call.request.include,
+        call.request.limit,
+        origin(call.request),
+      ),
       attribution: answer.attribution ?? [],
       unavailable: plan.unavailable,
       ignored: plan.ignored,

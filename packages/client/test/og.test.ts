@@ -115,7 +115,8 @@ describe("the og adapter", () => {
           location: { lat: 43.6535, lon: -79.3839 },
           accuracy: "centroid",
           confidence: null,
-          distance: null,
+          // og sent no distance for this one, so it is measured from the focus.
+          distance: 499.92,
           address: {
             houseNumber: null,
             street: null,
@@ -281,7 +282,8 @@ describe("the og adapter", () => {
 // Runs against a real og server when OG_URL is set, for example OG_URL=http://127.0.0.1:8081.
 // OG_TEST_ADDRESS names an address the server's Pack holds. Default `24 Sussex Drive Ottawa`.
 describe.runIf(process.env["OG_URL"])("against a live og", () => {
-  const baseUrl = process.env["OG_URL"]!;
+  // The body of a skipped suite still runs, so the adapter needs a URL either way.
+  const baseUrl = process.env["OG_URL"] ?? "http://og.invalid";
   const query = process.env["OG_TEST_ADDRESS"] ?? "24 Sussex Drive Ottawa";
   const geo = new Geocoder({ adapter: og({ baseUrl }) });
 

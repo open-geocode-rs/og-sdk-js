@@ -312,7 +312,8 @@ describe("batch", () => {
     expect(result.mode).toBe("native");
     expect(result.items[0]).toMatchObject({ index: 0, id: "a", results: [] });
     expect(result.items[0]!.error?.code).toBe("invalid_request");
-    expect(result.items[1]!.results).toEqual([place({ name: "second" })]);
+    // The adapter sent no distance, so it is measured from the item's own point.
+    expect(result.items[1]!.results).toEqual([place({ name: "second", distance: 9238015.92 })]);
     expect(result.summary).toEqual({ total: 2, succeeded: 1, failed: 1 });
     expect(adapter.native.calls).toHaveLength(0);
   });

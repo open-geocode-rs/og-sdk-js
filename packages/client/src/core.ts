@@ -61,7 +61,7 @@ export interface Call {
   /** A path under the transport's `baseUrl`, or an absolute URL. */
   path: string;
   query?: Record<string, unknown> | URLSearchParams;
-  body?: string;
+  body?: BodyInit;
   headers?: Record<string, string>;
   /** Whether a retry can repeat the call safely. Job creation cannot. */
   idempotent: boolean;

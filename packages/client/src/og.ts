@@ -183,7 +183,8 @@ function toPlace(feature: Feature): PlaceRecord {
 }
 
 function credits(collection: ForwardCollection | ReverseCollection): Attribution[] {
-  return collection.geocoding.attribution.map((credit) => ({
+  // A server older than the attribution field sends none.
+  return (collection.geocoding.attribution ?? []).map((credit) => ({
     text: credit.text,
     url: credit.url ?? null,
     licence: credit.licence ?? null,

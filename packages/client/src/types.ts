@@ -88,7 +88,10 @@ export interface Place {
   accuracy: Accuracy | null;
   /** How sure the provider is that this is what the query asked for, from 0 to 1. */
   confidence: number | null;
-  /** Metres from the reverse point, or from `focus`. */
+  /**
+   * Metres from the reverse point, or from `focus`.
+   * The provider's own figure where it sends one, else the great-circle distance to `location`.
+   */
   distance: number | null;
   address: Address;
 }
@@ -198,6 +201,8 @@ export type MatchStatus = "matched" | "partial" | "unmatched" | "inferred" | "no
 export interface Match {
   /** How much of the query the result explains, from 0 to 1. */
   score: number | null;
+  /** The provider's own grade of the match, where it grades in words, such as `exact` or `high`. */
+  label: string | null;
   components: Partial<
     Record<
       | "houseNumber"
