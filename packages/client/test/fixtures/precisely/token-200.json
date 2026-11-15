@@ -1,0 +1,6 @@
+{
+  "access_token": "fake-header.fake-payload.fake-signature",
+  "token_type": "Bearer",
+  "expires_in": 1800,
+  "scope": "default"
+}

@@ -1,0 +1,20 @@
+{
+  "jobs": [
+    {
+      "jobId": "2f81c6a0-b47d-4e35-90c2-6d1a5e8f03b7",
+      "emailId": "ops@example.com",
+      "fileId": "5b08d3e6-71c4-4a92-bf05-8c2e19d7a640",
+      "fileName": "harbour_batch",
+      "status": "SCHEDULED",
+      "submittedAt": "2026-03-04T08:02:41.305Z"
+    },
+    {
+      "jobId": "91d4e7b3-0c58-4a26-b7f9-e36a2c05d148",
+      "emailId": "ops@example.com",
+      "fileId": "5b08d3e6-71c4-4a92-bf05-8c2e19d7a640",
+      "fileName": "harbour_batch",
+      "status": "RUNNING",
+      "submittedAt": "2026-03-04T08:01:56.772Z"
+    }
+  ]
+}

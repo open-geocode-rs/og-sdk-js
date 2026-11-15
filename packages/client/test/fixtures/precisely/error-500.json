@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "status": "INTERNAL_ERROR",
+      "errorMessage": "An internal service failed. Try again later (DIS-1003)"
+    }
+  ]
+}

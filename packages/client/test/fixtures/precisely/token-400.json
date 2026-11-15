@@ -1,0 +1,4 @@
+{
+  "error": "invalid_request",
+  "error_description": "The key and secret are missing (DIS-AUTH-1020)"
+}

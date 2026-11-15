@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "status": "BATCH_SIZE_EXCEEDED",
+      "errorMessage": "A request may carry at most 25 items (DIS-LI-1014)"
+    }
+  ]
+}
