@@ -381,7 +381,18 @@ export interface components {
             postcode?: string;
             region?: string;
             street?: string;
+            /**
+             * @description `street` split into its parts as written. Absent when the street has
+             *     no type or direction to split off, such as `Broadway`.
+             */
+            street_parts?: components["schemas"]["StreetParts"];
             unit?: string;
+            /**
+             * @description `unit`'s designator as written, such as `Apt` of `Apt 4`. Absent
+             *     when the unit starts with none.
+             * @example Apt
+             */
+            unit_type?: string;
         };
         /**
          * @description A data set an answer comes from and how its licence asks it to be
@@ -457,6 +468,17 @@ export interface components {
              */
             road_class?: components["schemas"]["RoadClass"];
             source: components["schemas"]["Source"];
+            /**
+             * @description The result's name in each further language `lang` asks for, by the
+             *     code as asked. Present only when `lang` names more than one language
+             *     and the result has a name in at least one of the others.
+             * @example {
+             *       "de": "Genf"
+             *     }
+             */
+            translations?: {
+                [key: string]: string;
+            };
         };
         /**
          * @description Areas containing the result, one per tier, most specific first. A tier
@@ -475,9 +497,27 @@ export interface components {
             subregion?: components["schemas"]["ContextArea"];
         };
         ContextArea: {
+            /**
+             * @description ISO code of the area. On `country` its ISO 3166-1 alpha-2 code, such
+             *     as `NZ`. On an area below it, its ISO 3166-2 code, such as `CA-ON`,
+             *     when the source data gives one.
+             * @example NZ
+             */
+            code?: string;
             /** @description Stable ID from the source data, as in a result's `id`. */
             id: string;
             name: string;
+            /**
+             * @description The area's name in each further language `lang` asks for, by the
+             *     code as asked. Present only when `lang` names more than one language
+             *     and the area has a name in at least one of the others.
+             * @example {
+             *       "de": "Genf"
+             *     }
+             */
+            translations?: {
+                [key: string]: string;
+            };
         };
         /**
          * @description Stable error code.
@@ -535,6 +575,12 @@ export interface components {
              *     the Pack is calibrated. `0` on a `fallback` result.
              */
             confidence?: number;
+            /**
+             * Format: double
+             * @description Distance from the request's `focus` point in meters. Present only
+             *     when the request gives `focus`.
+             */
+            distance_m?: number;
             /**
              * @description `true` when no match was found and the result is the most precise
              *     area the query names instead: its postcode, a town or other area,
@@ -889,6 +935,20 @@ export interface components {
             dataset: string;
         };
         /**
+         * @description The parts of a street name, as written: `W Main St N` is the prefix `W`,
+         *     the name `Main`, the type `St` and the suffix `N`.
+         */
+        StreetParts: {
+            /** @description The street's own name, without its type and directions. */
+            name: string;
+            /** @description Direction before the name. */
+            prefix?: string;
+            /** @description Direction after the name. */
+            suffix?: string;
+            /** @description Street type, such as `Street` or `Ave`. */
+            type?: string;
+        };
+        /**
          * @description API version. Changes only when a field is removed or changes meaning.
          *     New optional fields keep the version.
          * @enum {string}
@@ -939,6 +999,11 @@ export interface operations {
                  * @example -79.64,43.58,-79.12,43.86
                  */
                 bbox?: string;
+                /**
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @example fr,de
+                 */
+                lang?: string;
             };
             header?: never;
             path?: never;
@@ -1052,6 +1117,11 @@ export interface operations {
                  * @example NZ,AU
                  */
                 country?: string;
+                /**
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @example fr,de
+                 */
+                lang?: string;
             };
             header?: never;
             path?: never;
@@ -1703,6 +1773,11 @@ export interface operations {
                  * @example 4.73,52.28,5.07,52.43
                  */
                 bbox?: string;
+                /**
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @example fr,de
+                 */
+                lang?: string;
             };
             header?: never;
             path?: never;
@@ -1995,6 +2070,11 @@ export interface operations {
                 lat: number;
                 /** @description Return only the nearest result of this layer, or for an area layer the area of that layer the point lies in, and no other area. An unknown layer returns `400`. */
                 layer?: components["schemas"]["Layer"];
+                /**
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @example fr,de
+                 */
+                lang?: string;
             };
             header?: never;
             path?: never;
