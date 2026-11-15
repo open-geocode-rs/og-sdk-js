@@ -28,8 +28,12 @@ jobs:
         run: bun run size
       - name: API reference builds without warnings
         run: bun run docs
+      - name: README provider tables match the adapters
+        run: bun run docs:capabilities && git diff --exit-code packages/client/README.md
       - name: Bundles in a real Vite app
-        run: bun run test:ecosystem
+        run: cd ecosystem-tests/vite && bunx vite build --logLevel warn
+      - name: An adapter pulls in no other provider
+        run: node ecosystem-tests/treeshake/check.mjs
       - name: Install browsers
         run: bunx playwright install --with-deps chromium firefox webkit
       - run: bun run test:browser
@@ -54,6 +58,9 @@ jobs:
           deno-version: v2.x
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: node scripts/smoke.mjs
-      - run: bun scripts/smoke.mjs
-      - run: deno run --allow-read scripts/smoke.mjs
+      - run: node smoke.mjs
+        working-directory: ecosystem-tests/runtimes
+      - run: bun smoke.mjs
+        working-directory: ecosystem-tests/runtimes
+      - run: deno run --allow-read --allow-env smoke.mjs
+        working-directory: ecosystem-tests/runtimes

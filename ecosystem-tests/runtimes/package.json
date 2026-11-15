@@ -1,0 +1,9 @@
+{
+  "name": "ecosystem-test-runtimes",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@open-geocode/autocomplete-core": "workspace:*",
+    "@open-geocode/client": "workspace:*"
+  }
+}
