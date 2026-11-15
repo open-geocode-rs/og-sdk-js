@@ -1,0 +1,39 @@
+{
+  "suggestions": [
+    {
+      "placePrediction": {
+        "place": "places/ChIJ5YQQf1GHhYARPKG7WLIaOko",
+        "placeId": "ChIJ5YQQf1GHhYARPKG7WLIaOko",
+        "text": {
+          "text": "Amoeba Music, Haight Street, San Francisco, CA, USA",
+          "matches": [
+            {
+              "endOffset": 6
+            }
+          ]
+        },
+        "structuredFormat": {
+          "mainText": {
+            "text": "Amoeba Music",
+            "matches": [
+              {
+                "endOffset": 6
+              }
+            ]
+          },
+          "secondaryText": {
+            "text": "Haight Street, San Francisco, CA, USA"
+          }
+        },
+        "types": [
+          "home_goods_store",
+          "establishment",
+          "point_of_interest",
+          "store",
+          "electronics_store"
+        ],
+        "distanceMeters": 3012
+      }
+    }
+  ]
+}

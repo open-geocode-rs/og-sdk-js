@@ -1,0 +1,96 @@
+{
+  "results": [
+    {
+      "place": "//places.googleapis.com/places/ChIJV-FZF7i7j4ARo4ZOUoecZFU",
+      "placeId": "ChIJV-FZF7i7j4ARo4ZOUoecZFU",
+      "location": {
+        "latitude": 37.422588300000008,
+        "longitude": -122.0846489
+      },
+      "granularity": "ROOFTOP",
+      "viewport": {
+        "low": {
+          "latitude": 37.421239319708512,
+          "longitude": -122.0859978802915
+        },
+        "high": {
+          "latitude": 37.423937280291511,
+          "longitude": -122.08329991970851
+        }
+      },
+      "formattedAddress": "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
+      "addressComponents": [
+        {
+          "longText": "1600",
+          "shortText": "1600",
+          "types": [
+            "street_number"
+          ]
+        },
+        {
+          "longText": "Amphitheatre Parkway",
+          "shortText": "Amphitheatre Pkwy",
+          "types": [
+            "route"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "Mountain View",
+          "shortText": "Mountain View",
+          "types": [
+            "locality",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "Santa Clara County",
+          "shortText": "Santa Clara County",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "California",
+          "shortText": "CA",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "United States",
+          "shortText": "US",
+          "types": [
+            "country",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "94043",
+          "shortText": "94043",
+          "types": [
+            "postal_code"
+          ]
+        }
+      ],
+      "types": [
+        "street_address"
+      ],
+      "plusCode": {
+        "globalCode": "849VCW83+PM",
+        "compoundCode": "CW83+PM Mountain View, CA, USA"
+      }
+    },
+   ...
+  ],
+  "plusCode": {
+    "globalCode": "849VCWF8+24H",
+    "compoundCode": "CWF8+24H Mountain View, CA, USA"
+  }
+}
