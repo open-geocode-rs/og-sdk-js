@@ -46,8 +46,12 @@ const OPTIONS: readonly [OptionName, string][] = [
   ["structured", "An address given in parts"],
 ];
 
-/** Fields no commercially usable open data holds, so og cannot add them whoever returns them. */
-const NO_OPEN_DATA = new Set<FieldName>(["rating"]);
+/**
+ * Fields og cannot add whoever returns them.
+ * No commercially usable open data holds a rating.
+ * A business closed for good is not in a Pack at all, so og has no record to mark as closed.
+ */
+const NO_OPEN_DATA = new Set<FieldName>(["rating", "businessStatus"]);
 
 /** A field is worth adding to og on an operation when at least this many of the vendors return it there. */
 const VENDOR_BAR = 2;
@@ -259,8 +263,11 @@ tr.group th{background:var(--head);text-align:left;font-size:12px;font-weight:60
 <li><span class="pill yes">Yes</span> The provider returns it, or honours the option.</li>
 <li><span class="pill no">No</span> The provider cannot. The field is <code>null</code> and listed in <code>unavailable</code>.</li>
 <li><span class="pill measured">Measured</span> The provider sends none, so the SDK measures it.</li>
-<li><span class="pill planned">Can add</span> og lacks it, at least ${VENDOR_BAR} of the ${list.length - 1} vendors return it on this operation, and open data holds it.</li>
-<li><span class="pill none">n/a</span> Does not apply to this operation.</li>
+${
+  panels.includes("pill planned")
+    ? `<li><span class="pill planned">Can add</span> og lacks it, at least ${VENDOR_BAR} of the ${list.length - 1} vendors return it on this operation, and open data holds it.</li>\n`
+    : ""
+}<li><span class="pill none">n/a</span> Does not apply to this operation.</li>
 </ul>
 <div role="tablist" aria-label="Operation">${buttons}</div>
 ${panels}
