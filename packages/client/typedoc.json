@@ -1,4 +1,13 @@
 {
   "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/og.ts",
+    "src/google.ts",
+    "src/mapbox.ts",
+    "src/here.ts",
+    "src/precisely.ts",
+    "src/plugins/index.ts"
+  ],
   "intentionallyNotExported": ["Query", "Loose"]
 }

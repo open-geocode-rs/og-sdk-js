@@ -1,7 +1,15 @@
 {
   "name": "@open-geocode/client",
   "version": "0.0.0",
-  "description": "Typed client for the open-geocode API. No runtime dependencies.",
+  "description": "One geocoding API over og, Google, Mapbox, HERE and Precisely. Typed, tree-shakeable, no runtime dependencies.",
+  "keywords": [
+    "autocomplete",
+    "geocoder",
+    "geocoding",
+    "open-geocode",
+    "places",
+    "reverse-geocoding"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -17,6 +25,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./og": {
+      "types": "./dist/og.d.ts",
+      "default": "./dist/og.js"
+    },
+    "./google": {
+      "types": "./dist/google.d.ts",
+      "default": "./dist/google.js"
+    },
+    "./mapbox": {
+      "types": "./dist/mapbox.d.ts",
+      "default": "./dist/mapbox.js"
+    },
+    "./here": {
+      "types": "./dist/here.d.ts",
+      "default": "./dist/here.js"
+    },
+    "./precisely": {
+      "types": "./dist/precisely.d.ts",
+      "default": "./dist/precisely.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins.d.ts",
+      "default": "./dist/plugins.js"
     },
     "./package.json": "./package.json"
   },
