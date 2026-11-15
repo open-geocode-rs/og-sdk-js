@@ -184,21 +184,21 @@ Anywhere else it is measured here, from the reverse point or from `focus` to the
 | `confidence`     | all     | no       | no       | g       | no          |
 | `distance`       | g r a p | r a      | r a p    | g r a p | r a         |
 | `address`        | all     | g r p l  | all      | all     | all         |
-| `bbox`           | no      | g r p l  | g r p l  | all     | no          |
+| `bbox`           | g r p l | g r p l  | g r p l  | all     | no          |
 | `context`        | all     | no       | all      | no      | no          |
 | `addressDetails` | all     | g r p l  | all      | all     | all         |
-| `addressLines`   | no      | g r p l  | no       | no      | all         |
+| `addressLines`   | g r l   | g r p l  | no       | no      | all         |
 | `streetParts`    | all     | no       | no       | all     | no          |
 | `categories`     | all     | p l      | a p l    | all     | no          |
 | `brand`          | all     | no       | a p l    | a p l   | no          |
-| `contact`        | no      | p l      | a p l    | a p l   | no          |
-| `openingHours`   | no      | p l      | a p l    | a p l   | no          |
+| `contact`        | a p l   | p l      | a p l    | a p l   | no          |
+| `openingHours`   | a p l   | p l      | a p l    | a p l   | no          |
 | `rating`         | no      | p l      | a p l    | no      | no          |
 | `businessStatus` | no      | p l      | a p l    | l       | no          |
-| `timezone`       | no      | p l      | no       | all     | no          |
-| `accessPoints`   | no      | p l      | g r p l  | all     | no          |
-| `match`          | no      | no       | g        | g       | g a         |
-| `highlights`     | no      | a        | no       | a       | a           |
+| `timezone`       | p l     | p l      | no       | all     | no          |
+| `accessPoints`   | g r p l | p l      | g r p l  | all     | no          |
+| `match`          | g       | no       | g        | g       | g a         |
+| `highlights`     | a       | a        | no       | a       | a           |
 | `translations`   | all     | no       | no       | no      | no          |
 | `plusCode`       | no      | g r p l  | no       | no      | no          |
 

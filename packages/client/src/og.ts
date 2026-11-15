@@ -16,6 +16,8 @@ import {
   emptyAddress,
   type OperationCapabilities,
   streetLine,
+  toStringRanges,
+  utcOffsetMinutes,
 } from "./adapter.ts";
 import {
   type Client,
@@ -28,6 +30,9 @@ import { OgError } from "./errors.ts";
 import type { components } from "./schema.gen.ts";
 import type {
   Attribution,
+  BBox,
+  Match,
+  Operation,
   BaseRequest,
   Context,
   ContextArea,
@@ -100,10 +105,36 @@ const SEARCH: readonly OptionName[] = [
   "types",
 ];
 
-const forward = (options: readonly OptionName[]): OperationCapabilities => ({
-  options,
-  fields: [...FIELDS, "distance"],
-});
+/**
+ * The fields og fills on each operation, beyond `FIELDS`.
+ * og's server returns most of them wherever a record appears. The adapter claims and fills
+ * each one only on the operations where it was added to og, so the unified answer of an
+ * operation holds what that operation is documented to return and nothing more.
+ */
+const EXTRA: Record<Operation, readonly FieldName[]> = {
+  geocode: ["distance", "bbox", "addressLines", "accessPoints", "match"],
+  reverse: ["distance", "bbox", "addressLines", "accessPoints"],
+  autocomplete: ["distance", "contact", "openingHours", "highlights"],
+  places: ["distance", "bbox", "contact", "openingHours", "timezone", "accessPoints"],
+  lookup: ["bbox", "addressLines", "contact", "openingHours", "timezone", "accessPoints"],
+};
+
+const filled = (operation: Operation): readonly FieldName[] => [...FIELDS, ...EXTRA[operation]];
+
+const capability = (
+  operation: Operation,
+  options: readonly OptionName[],
+): OperationCapabilities => ({ options, fields: filled(operation) });
+
+const MATCH_PARTS = {
+  housenumber: "houseNumber",
+  street: "street",
+  unit: "unit",
+  locality: "locality",
+  region: "region",
+  postcode: "postcode",
+  country: "country",
+} as const;
 
 function area(source: Area | undefined): ContextArea | null {
   if (source === undefined) return null;
@@ -116,8 +147,9 @@ function area(source: Area | undefined): ContextArea | null {
   };
 }
 
-function toPlace(feature: Feature): PlaceRecord {
+function toPlace(feature: Feature, operation: Operation): PlaceRecord {
   const p = feature.properties;
+  const fills = (field: FieldName): boolean => EXTRA[operation].includes(field);
   const [lon, lat] = feature.geometry.coordinates as [number, number];
   const stated = p.address;
   const around = p.context;
@@ -178,8 +210,45 @@ function toPlace(feature: Feature): PlaceRecord {
     categories: p.category ? [{ id: p.category, name: null, primary: true }] : null,
     brand: p.brand ? { name: p.brand.name, id: null, wikidata: p.brand.wikidata ?? null } : null,
     translations: p.translations ?? null,
+    bbox: fills("bbox") && p.bbox?.length === 4 ? (p.bbox as BBox) : null,
+    addressLines: fills("addressLines") && p.address_lines?.length ? p.address_lines : null,
+    accessPoints:
+      fills("accessPoints") && p.access?.length
+        ? p.access.map((point) => ({ lat: point.lat, lon: point.lon, kind: point.kind }))
+        : null,
+    contact:
+      fills("contact") && p.contact
+        ? {
+            phone: p.contact.phone ?? null,
+            website: p.contact.website ?? null,
+            email: p.contact.email ?? null,
+          }
+        : null,
+    // og returns the hours as the source writes them, unparsed, so it cannot say open or shut.
+    openingHours:
+      fills("openingHours") && p.opening_hours ? { text: [p.opening_hours], openNow: null } : null,
+    // og names the zone, and the runtime's own rules give the offset, so og ships no rules to go stale.
+    timezone:
+      fills("timezone") && p.timezone
+        ? { name: p.timezone, utcOffsetMinutes: utcOffsetMinutes(p.timezone) }
+        : null,
+    match: fills("match") && "match" in p && p.match ? toMatch(p.match) : null,
+    // og counts in Unicode characters, and a JavaScript string in UTF-16 units.
+    highlights:
+      fills("highlights") && "highlights" in p && p.highlights?.length
+        ? toStringRanges(p.label, p.highlights)
+        : null,
     raw: feature,
   };
+}
+
+function toMatch(source: components["schemas"]["QueryMatch"]): Match {
+  const parts: Match["components"] = {};
+  for (const [key, part] of Object.entries(MATCH_PARTS)) {
+    const status = source[key as keyof typeof MATCH_PARTS];
+    if (status !== undefined) parts[part] = status;
+  }
+  return { score: null, label: null, components: parts };
 }
 
 function credits(collection: ForwardCollection | ReverseCollection): Attribution[] {
@@ -194,8 +263,9 @@ function credits(collection: ForwardCollection | ReverseCollection): Attribution
 function result(
   answer: WithResponse<ForwardCollection | ReverseCollection>,
   types: readonly PlaceType[] | undefined,
+  operation: Operation,
 ): AdapterResult {
-  let results = answer.data.features.map(toPlace);
+  let results = answer.data.features.map((feature) => toPlace(feature, operation));
   // og filters by one layer at most, so a longer list is applied here.
   if (types !== undefined) results = results.filter((place) => types.includes(place.type));
   return {
@@ -269,6 +339,7 @@ export function og(options: OgOptions): Adapter<Client> {
                 results: result(
                   { data: row.response, response: undefined as never, requestId: undefined },
                   context.request.types,
+                  endpoint,
                 ).results,
               },
         );
@@ -291,11 +362,11 @@ export function og(options: OgOptions): Adapter<Client> {
     id: "og",
     native: client,
     capabilities: {
-      geocode: forward([...SEARCH, "structured"]),
-      reverse: { options: ["limit", "language", "types"], fields: [...FIELDS, "distance"] },
-      autocomplete: { ...forward(SEARCH), coordinates: true },
-      places: forward(SEARCH),
-      lookup: { options: ["language"], fields: FIELDS },
+      geocode: capability("geocode", [...SEARCH, "structured"]),
+      reverse: capability("reverse", ["limit", "language", "types"]),
+      autocomplete: { ...capability("autocomplete", SEARCH), coordinates: true },
+      places: capability("places", SEARCH),
+      lookup: capability("lookup", ["language"]),
       batch: { geocode: true, reverse: true },
     },
     async geocode(request, call) {
@@ -319,10 +390,10 @@ export function og(options: OgOptions): Adapter<Client> {
             call,
           )
           .withResponse();
-        return result(answer, request.types);
+        return result(answer, request.types, "geocode");
       }
       const answer = await client.geocode({ ...params, q: request.query }, call).withResponse();
-      return result(answer, request.types);
+      return result(answer, request.types, "geocode");
     },
     async reverse(request, call) {
       const answer = await client
@@ -336,19 +407,19 @@ export function og(options: OgOptions): Adapter<Client> {
           call,
         )
         .withResponse();
-      return result(answer, request.types);
+      return result(answer, request.types, "reverse");
     },
     async autocomplete(request, call) {
       const answer = await client
         .autocomplete({ ...common(request), ...layerOf(request.types), q: request.query }, call)
         .withResponse();
-      return result(answer, request.types);
+      return result(answer, request.types, "autocomplete");
     },
     async places(request, call) {
       const answer = await client
         .places({ ...common(request), q: request.query }, call)
         .withResponse();
-      return result(answer, request.types);
+      return result(answer, request.types, "places");
     },
     async lookup(request, call) {
       const answer = await client
@@ -360,7 +431,7 @@ export function og(options: OgOptions): Adapter<Client> {
           call,
         )
         .withResponse();
-      return result(answer, undefined);
+      return result(answer, undefined, "lookup");
     },
     batch: {
       geocode(items, context) {

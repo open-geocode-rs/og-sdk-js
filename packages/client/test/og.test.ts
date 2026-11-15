@@ -4,6 +4,7 @@ import { Geocoder, type GeocoderError } from "../src/index.ts";
 import { og } from "../src/og.ts";
 import { cache, compare, type CompareReport, failover } from "../src/plugins/index.ts";
 import forwardFixture from "./fixtures/og/geocode.json" with { type: "json" };
+import placesFixture from "./fixtures/og/places.json" with { type: "json" };
 import { fakeFetch, urlOf } from "./helpers.ts";
 
 const geocoder = (fetch: typeof globalThis.fetch) =>
@@ -171,9 +172,98 @@ describe("the og adapter", () => {
         },
         { text: "City of Toronto", url: null, licence: null },
       ],
-      unavailable: ["bbox"],
+      unavailable: [],
       ignored: [],
     });
+  });
+
+  // The fixture carries every field og can return, on one record, whatever the endpoint.
+  const EVERY = [
+    "bbox",
+    "addressLines",
+    "accessPoints",
+    "contact",
+    "openingHours",
+    "timezone",
+    "match",
+    "highlights",
+  ] as const;
+
+  it("fills on each operation the fields og was given for it, and no others", async () => {
+    const geo = geocoder(fakeFetch({ body: placesFixture }));
+    const bbox = [-79.3903, 43.6486, -79.3899, 43.6488];
+    const addressLines = ["200 Queen Street West", "Toronto ON M5V 1Z2", "Canada"];
+    const accessPoints = [{ lat: 43.64865, lon: -79.39, kind: "main" }];
+    const contact = {
+      phone: "+1 416-555-0111",
+      website: "https://queenbakery.example/",
+      email: null,
+    };
+    const openingHours = { text: ["Mo-Fr 08:00-18:00; Sa 09:00-13:00"], openNow: null };
+    const pick = (place: object): object =>
+      Object.fromEntries(EVERY.map((key) => [key, (place as Record<string, unknown>)[key]]));
+
+    const places = await geo.places("Queen Bakery", { include: EVERY });
+    expect(pick(places.results[0]!)).toEqual({
+      bbox,
+      addressLines: null,
+      accessPoints,
+      contact,
+      openingHours,
+      timezone: { name: "America/Toronto", utcOffsetMinutes: expect.any(Number) },
+      match: null,
+      highlights: null,
+    });
+    expect([-300, -240]).toContain(places.results[0]!.timezone!.utcOffsetMinutes);
+    expect(places.unavailable).toEqual(["addressLines", "match", "highlights"]);
+
+    const forward = await geo.geocode("200 Quen St W M5V 9Z9", { include: EVERY });
+    expect(pick(forward.results[0]!)).toEqual({
+      bbox,
+      addressLines,
+      accessPoints,
+      contact: null,
+      openingHours: null,
+      timezone: null,
+      match: {
+        score: null,
+        label: null,
+        components: { houseNumber: "matched", street: "partial", postcode: "unmatched" },
+      },
+      highlights: null,
+    });
+    expect(forward.unavailable).toEqual(["contact", "openingHours", "timezone", "highlights"]);
+
+    const typed = await geo.autocomplete("queen wes", { include: EVERY });
+    expect(pick(typed.results[0]!)).toEqual({
+      bbox: null,
+      addressLines: null,
+      accessPoints: null,
+      contact,
+      openingHours,
+      timezone: null,
+      match: null,
+      // og counts characters. The pastry is one character and two string units, so the second range moves by one.
+      highlights: [
+        { start: 0, end: 5 },
+        { start: 17, end: 20 },
+      ],
+    });
+    const { label } = typed.results[0]!;
+    expect(
+      typed.results[0]!.highlights!.map((range) => label.slice(range.start, range.end)),
+    ).toEqual(["Queen", "200"]);
+
+    const found = await geo.lookup("osm:way:77", { include: EVERY });
+    expect(found.unavailable).toEqual(["distance", "match", "highlights"]);
+    const back = await geo.reverse({ lat: 43.6487, lon: -79.3901 }, { include: EVERY });
+    expect(back.unavailable).toEqual([
+      "contact",
+      "openingHours",
+      "timezone",
+      "match",
+      "highlights",
+    ]);
   });
 
   it("sends an address in parts to og's structured geocoder", async () => {
@@ -315,6 +405,32 @@ describe.runIf(process.env["OG_URL"])("against a live og", () => {
     const typed = await geo.autocomplete(query.slice(0, 12), { limit: 3 });
     expect(typed.results.length).toBeGreaterThan(0);
     expect(typed.results.every((place) => place.location !== null)).toBe(true);
+  });
+
+  it("returns the fields og was given, from a real Pack", async () => {
+    const forward = await geo.geocode(query, {
+      limit: 1,
+      include: ["addressLines", "match", "bbox", "accessPoints"],
+    });
+    const [hit] = forward.results;
+    expect(hit!.addressLines!.length).toBeGreaterThan(1);
+    expect(hit!.match!.components.street).toBe("matched");
+    expect(forward.unavailable).toEqual([]);
+
+    const typed = await geo.autocomplete(query.slice(0, 12), { limit: 1, include: ["highlights"] });
+    const suggestion = typed.results[0]!;
+    expect(suggestion.highlights!.length).toBeGreaterThan(0);
+    for (const range of suggestion.highlights!)
+      expect(suggestion.label.slice(range.start, range.end)).not.toBe("");
+
+    const area = await geo.lookup(hit!.id!, { include: ["bbox", "timezone", "contact"] });
+    expect(area.unavailable).toEqual(["distance"]);
+    // Present only when the Pack was built with timezone boundaries.
+    const zone = area.results[0]!.timezone;
+    if (zone !== null) {
+      expect(zone.name).toMatch(/^[A-Z][A-Za-z_]+\/[A-Za-z_/]+$/);
+      expect(Number.isInteger(zone.utcOffsetMinutes)).toBe(true);
+    }
   });
 
   it("runs native batches through /jobs", async () => {

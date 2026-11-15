@@ -249,6 +249,44 @@ export function oneLine(address: StructuredAddress): string {
     .join(", ");
 }
 
+/**
+ * Minutes a timezone is ahead of UTC at `at`, from the runtime's own timezone rules.
+ * `null` when the runtime does not know the zone.
+ */
+export function utcOffsetMinutes(zone: string, at: Date = new Date()): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      timeZoneName: "longOffset",
+    }).formatToParts(at);
+    const offset = parts.find((part) => part.type === "timeZoneName")?.value ?? "";
+    if (offset === "GMT") return 0;
+    const found = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(offset);
+    if (!found) return null;
+    const minutes = Number(found[2]) * 60 + Number(found[3] ?? 0);
+    return found[1] === "-" ? -minutes : minutes;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ranges counted in Unicode characters, as ranges into a JavaScript string,
+ * where a character outside the basic plane takes two units.
+ */
+export function toStringRanges(
+  label: string,
+  ranges: readonly { start: number; end: number }[],
+): { start: number; end: number }[] {
+  const units: number[] = [0];
+  for (const char of label) units.push((units.at(-1) as number) + char.length);
+  const last = units.length - 1;
+  return ranges.map((range) => ({
+    start: units[Math.min(range.start, last)] as number,
+    end: units[Math.min(range.end, last)] as number,
+  }));
+}
+
 const EARTH_RADIUS_M = 6_371_008.8;
 
 /** Great-circle distance between two points, in metres. */

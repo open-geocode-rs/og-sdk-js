@@ -1,0 +1,51 @@
+{
+  "type": "FeatureCollection",
+  "geocoding": {
+    "version": "1",
+    "query": "Queen Bakery",
+    "attribution": [
+      {
+        "text": "© OpenStreetMap contributors",
+        "licence": "ODbL 1.0",
+        "url": "https://www.openstreetmap.org/copyright"
+      }
+    ]
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [-79.3901, 43.6487] },
+      "properties": {
+        "id": "osm:way:77",
+        "layer": "poi",
+        "accuracy": "rooftop",
+        "name": "Queen Bakery 🥐",
+        "label": "Queen Bakery 🥐, 200 Queen Street West, Toronto",
+        "category": "shop:bakery",
+        "address": {
+          "housenumber": "200",
+          "street": "Queen Street West",
+          "locality": "Toronto",
+          "postcode": "M5V 1Z2"
+        },
+        "address_lines": ["200 Queen Street West", "Toronto ON M5V 1Z2", "Canada"],
+        "bbox": [-79.3903, 43.6486, -79.3899, 43.6488],
+        "timezone": "America/Toronto",
+        "access": [{ "lon": -79.39, "lat": 43.64865, "kind": "main" }],
+        "contact": { "phone": "+1 416-555-0111", "website": "https://queenbakery.example/" },
+        "opening_hours": "Mo-Fr 08:00-18:00; Sa 09:00-13:00",
+        "match": { "housenumber": "matched", "street": "partial", "postcode": "unmatched" },
+        "highlights": [
+          { "start": 0, "end": 5 },
+          { "start": 16, "end": 19 }
+        ],
+        "context": {
+          "region": { "id": "osm:relation:68841", "name": "Ontario", "code": "CA-ON" },
+          "country": { "id": "osm:relation:1428125", "name": "Canada", "code": "CA" }
+        },
+        "source": { "dataset": "osm" },
+        "score": 12.5
+      }
+    }
+  ]
+}

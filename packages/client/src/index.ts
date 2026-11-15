@@ -37,6 +37,8 @@ export {
   streetLine,
   text,
   toParams,
+  toStringRanges,
+  utcOffsetMinutes,
   type Adapter,
   type AdapterBatchItem,
   type AdapterCapabilities,

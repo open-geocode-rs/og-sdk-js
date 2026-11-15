@@ -54,7 +54,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/og.js": "{ og }"
       },
-      "limit": "6.7 kB"
+      "limit": "7.2 kB"
     },
     {
       "name": "Geocoder with the google adapter",
