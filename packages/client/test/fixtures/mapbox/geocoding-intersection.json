@@ -1,0 +1,69 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "dXJuOm1ieGFkci1zdHI6MmY4YzYwZDMtNzFhYi00ZTk1LTljMGYtNWQzZThhNDdiNjIx",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -115.317462,
+          44.428615
+        ]
+      },
+      "properties": {
+        "mapbox_id": "dXJuOm1ieGFkci1zdHI6MmY4YzYwZDMtNzFhYi00ZTk1LTljMGYtNWQzZThhNDdiNjIx",
+        "feature_type": "street",
+        "full_address": "Cooper Lane and Vesper Street, Marrowgate, Idaho 83857, United States",
+        "name": "Cooper Lane and Vesper Street",
+        "name_preferred": "Cooper Lane and Vesper Street",
+        "coordinates": {
+          "longitude": -115.317462,
+          "latitude": 44.428615,
+          "accuracy": "intersection"
+        },
+        "place_formatted": "Marrowgate, Idaho 83857, United States",
+        "context": {
+          "street": {
+            "mapbox_id": "dXJuOm1ieGFkci1zdHI6MmY4YzYwZDMtNzFhYi00ZTk1LTljMGYtNWQzZThhNDdiNjIx",
+            "name": "Vesper Street"
+          },
+          "neighborhood": {
+            "mapbox_id": "dXJuOm1ieHBsYzpMbXBRMnc",
+            "name": "Lamplighter Quarter",
+            "wikidata_id": "Q984627105"
+          },
+          "postcode": {
+            "mapbox_id": "dXJuOm1ieHBsYzpQek1nOEE",
+            "name": "83857"
+          },
+          "place": {
+            "mapbox_id": "dXJuOm1ieHBsYzpNckd0NFE",
+            "name": "Marrowgate",
+            "wikidata_id": "Q995738216"
+          },
+          "district": {
+            "mapbox_id": "dXJuOm1ieHBsYzpUdkxuNmc",
+            "name": "Tavelin County",
+            "wikidata_id": "Q906849327"
+          },
+          "region": {
+            "mapbox_id": "dXJuOm1ieHBsYzpJZEhv",
+            "name": "Idaho",
+            "wikidata_id": "Q917950438",
+            "region_code": "ID",
+            "region_code_full": "US-ID"
+          },
+          "country": {
+            "mapbox_id": "dXJuOm1ieHBsYzpRbTQ",
+            "name": "United States",
+            "wikidata_id": "Q940117302",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          }
+        }
+      }
+    }
+  ],
+  "attribution": "NOTICE: © 2026 Mapbox and its suppliers. This is a synthetic test response in the documented shape. The terms for real data are published by Mapbox (https://www.mapbox.com/about/maps/). Nothing in this response describes a real place."
+}

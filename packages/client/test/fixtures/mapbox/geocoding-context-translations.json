@@ -1,0 +1,81 @@
+{
+  "context": {
+    "address": {
+      "mapbox_id": "dXJuOm1ieGFkcjpjNzMwNWE5ZS02NGQxLTRiMjgtYTBmNy05MWUyYjZkNDM4MGM",
+      "address_number": "14",
+      "street_name": "Kesselgasse",
+      "name": "Kesselgasse 14"
+    },
+    "street": {
+      "mapbox_id": "dXJuOm1ieGFkcjpjNzMwNWE5ZS02NGQxLTRiMjgtYTBmNy05MWUyYjZkNDM4MGM",
+      "name": "Kesselgasse"
+    },
+    "neighborhood": {
+      "mapbox_id": "dXJuOm1ieHBsYzpIcEFuM1E",
+      "name": "Hopfenanger",
+      "translations": {
+        "en": {
+          "language": "en",
+          "name": "Hopfenanger"
+        },
+        "es": {
+          "language": "es",
+          "name": "Hopfenanger"
+        }
+      }
+    },
+    "postcode": {
+      "mapbox_id": "dXJuOm1ieHBsYzpQeldyN0E",
+      "name": "84917"
+    },
+    "place": {
+      "mapbox_id": "dXJuOm1ieHBsYzpXZFJkMXc",
+      "name": "Wendelried",
+      "wikidata_id": "Q928061549",
+      "translations": {
+        "en": {
+          "language": "en",
+          "name": "Wendelried"
+        },
+        "es": {
+          "language": "es",
+          "name": "Wendelried"
+        }
+      }
+    },
+    "region": {
+      "mapbox_id": "dXJuOm1ieHBsYzpCeVJu",
+      "name": "Bavaria",
+      "wikidata_id": "Q939172650",
+      "region_code": "BY",
+      "region_code_full": "DE-BY",
+      "translations": {
+        "en": {
+          "language": "en",
+          "name": "Bavaria"
+        },
+        "es": {
+          "language": "es",
+          "name": "Baviera"
+        }
+      }
+    },
+    "country": {
+      "mapbox_id": "dXJuOm1ieHBsYzpEZzc",
+      "name": "Germany",
+      "wikidata_id": "Q941283761",
+      "country_code": "DE",
+      "country_code_alpha_3": "DEU",
+      "translations": {
+        "en": {
+          "language": "en",
+          "name": "Germany"
+        },
+        "es": {
+          "language": "es",
+          "name": "Alemania"
+        }
+      }
+    }
+  }
+}

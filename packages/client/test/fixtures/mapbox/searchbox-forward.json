@@ -1,0 +1,81 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [
+          -105.137482,
+          39.612905
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "name": "2908 Wrenfold Court",
+        "mapbox_id": "dXJuOm1ieGFkcjplMjRmOGIwNi0zYTdkLTRjMTktOTVkMi1iMDhjNmUxZjdhNDM",
+        "feature_type": "address",
+        "address": "2908 Wrenfold Court",
+        "full_address": "2908 Wrenfold Court, Pellham Ridge, Colorado 80471, United States",
+        "place_formatted": "Pellham Ridge, Colorado 80471, United States",
+        "context": {
+          "country": {
+            "id": "dXJuOm1ieHBsYzpRbTQ",
+            "name": "United States",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          },
+          "region": {
+            "id": "dXJuOm1ieHBsYzpDbFJk",
+            "name": "Colorado",
+            "region_code": "CO",
+            "region_code_full": "US-CO"
+          },
+          "postcode": {
+            "id": "dXJuOm1ieHBsYzpQelByNUE",
+            "name": "80471"
+          },
+          "district": {
+            "id": "dXJuOm1ieHBsYzpTYldkMlE",
+            "name": "Sablewood County"
+          },
+          "place": {
+            "id": "dXJuOm1ieHBsYzpQbFJnOXc",
+            "name": "Pellham Ridge"
+          },
+          "neighborhood": {
+            "id": "dXJuOm1ieHBsYzpGd0RsN0E",
+            "name": "Farrowdale"
+          },
+          "address": {
+            "id": "dXJuOm1ieGFkcjplMjRmOGIwNi0zYTdkLTRjMTktOTVkMi1iMDhjNmUxZjdhNDM",
+            "name": "2908 Wrenfold Court",
+            "address_number": "2908",
+            "street_name": "Wrenfold Court"
+          },
+          "street": {
+            "id": "dXJuOm1ieGFkci1zdHI6N2IxM2Q5ZTUtYzY4MC00ZjJhLWE0ZDctMzZmMGU5OGMxYjUy",
+            "name": "Wrenfold Court"
+          }
+        },
+        "coordinates": {
+          "latitude": 39.612905,
+          "longitude": -105.137482,
+          "accuracy": "rooftop",
+          "routable_points": [
+            {
+              "name": "Address",
+              "latitude": 39.612771,
+              "longitude": -105.137533
+            }
+          ]
+        },
+        "language": "en",
+        "maki": "marker",
+        "metadata": {},
+        "distance": 8312
+      }
+    }
+  ],
+  "attribution": "© 2026 Mapbox and its suppliers. This is a synthetic test response in the documented shape. (https://www.mapbox.com/about/maps/)",
+  "response_id": "kT3vQ8mZ1xLr-5nYc0Wd7HsJ2bPfA6uE9gXoN4iV_tMq"
+}

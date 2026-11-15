@@ -1,0 +1,173 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "dXJuOm1ieGFkcjo0YmUwN2MxOS04M2EyLTRmNmQtYjVlMS0wN2M5ZDIxYTZmMzg",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -110.412736,
+          46.587319
+        ]
+      },
+      "properties": {
+        "mapbox_id": "dXJuOm1ieGFkcjo0YmUwN2MxOS04M2EyLTRmNmQtYjVlMS0wN2M5ZDIxYTZmMzg",
+        "feature_type": "address",
+        "name": "418 Tannery Row",
+        "coordinates": {
+          "longitude": -110.412736,
+          "latitude": 46.587319,
+          "accuracy": "rooftop"
+        },
+        "place_formatted": "Harrowmere, Montana 59917, United States",
+        "match_code": {
+          "address_number": "matched",
+          "street": "matched",
+          "postcode": "unmatched",
+          "place": "unmatched",
+          "region": "unmatched",
+          "locality": "not_applicable",
+          "country": "inferred",
+          "confidence": "low"
+        },
+        "context": {
+          "address": {
+            "mapbox_id": "dXJuOm1ieGFkcjo0YmUwN2MxOS04M2EyLTRmNmQtYjVlMS0wN2M5ZDIxYTZmMzg",
+            "address_number": "418",
+            "street_name": "Tannery Row",
+            "name": "418 Tannery Row"
+          },
+          "street": {
+            "mapbox_id": "dXJuOm1ieGFkcjo0YmUwN2MxOS04M2EyLTRmNmQtYjVlMS0wN2M5ZDIxYTZmMzg",
+            "name": "Tannery Row"
+          },
+          "neighborhood": {
+            "mapbox_id": "dXJuOm1ieHBsYzpNbFJjOHc",
+            "name": "Millrace",
+            "alternate": {
+              "mapbox_id": "dXJuOm1ieHBsYzpTdEt5Mmc",
+              "name": "Stokeley"
+            }
+          },
+          "postcode": {
+            "mapbox_id": "dXJuOm1ieHBsYzpQekhtNEE",
+            "name": "59917"
+          },
+          "place": {
+            "mapbox_id": "dXJuOm1ieHBsYzpId01lNlE",
+            "name": "Harrowmere",
+            "wikidata_id": "Q973516840",
+            "alternate": {
+              "mapbox_id": "dXJuOm1ieHBsYzpRbEZkOUE",
+              "name": "Quillfield"
+            }
+          },
+          "district": {
+            "mapbox_id": "dXJuOm1ieHBsYzpDclZrNVE",
+            "name": "Corvane County",
+            "wikidata_id": "Q951830274"
+          },
+          "region": {
+            "mapbox_id": "dXJuOm1ieHBsYzpIdFp3",
+            "name": "Montana",
+            "wikidata_id": "Q962405183",
+            "region_code": "MT",
+            "region_code_full": "US-MT"
+          },
+          "country": {
+            "mapbox_id": "dXJuOm1ieHBsYzpRbTQ",
+            "name": "United States",
+            "wikidata_id": "Q940117302",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          }
+        }
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "dXJuOm1ieGFkcjphOTFkNWU3Mi0wYzRiLTQ5ZjMtOGUyNi1mM2I3YzA1OGQ5MTQ",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -110.468205,
+          46.590144
+        ]
+      },
+      "properties": {
+        "mapbox_id": "dXJuOm1ieGFkcjphOTFkNWU3Mi0wYzRiLTQ5ZjMtOGUyNi1mM2I3YzA1OGQ5MTQ",
+        "feature_type": "address",
+        "name": "418 Tannery Row",
+        "coordinates": {
+          "longitude": -110.468205,
+          "latitude": 46.590144,
+          "accuracy": "interpolated"
+        },
+        "place_formatted": "Dunmarrow, Montana 59923, United States",
+        "match_code": {
+          "address_number": "plausible",
+          "street": "matched",
+          "postcode": "unmatched",
+          "place": "unmatched",
+          "region": "unmatched",
+          "locality": "not_applicable",
+          "country": "inferred",
+          "confidence": "low"
+        },
+        "context": {
+          "address": {
+            "mapbox_id": "dXJuOm1ieGFkcjphOTFkNWU3Mi0wYzRiLTQ5ZjMtOGUyNi1mM2I3YzA1OGQ5MTQ",
+            "address_number": "418",
+            "street_name": "Tannery Row",
+            "name": "418 Tannery Row"
+          },
+          "street": {
+            "mapbox_id": "dXJuOm1ieGFkcjphOTFkNWU3Mi0wYzRiLTQ5ZjMtOGUyNi1mM2I3YzA1OGQ5MTQ",
+            "name": "Tannery Row"
+          },
+          "neighborhood": {
+            "mapbox_id": "dXJuOm1ieHBsYzpBZEd0M3c",
+            "name": "Aldergate",
+            "alternate": {
+              "mapbox_id": "dXJuOm1ieHBsYzpQbkdyN1E",
+              "name": "Penhallow Green"
+            }
+          },
+          "postcode": {
+            "mapbox_id": "dXJuOm1ieHBsYzpQekRuMUE",
+            "name": "59923"
+          },
+          "place": {
+            "mapbox_id": "dXJuOm1ieHBsYzpEbk13NWc",
+            "name": "Dunmarrow",
+            "alternate": {
+              "mapbox_id": "dXJuOm1ieHBsYzpXeENiMFE",
+              "name": "Wexcombe"
+            }
+          },
+          "district": {
+            "mapbox_id": "dXJuOm1ieHBsYzpDclZrNVE",
+            "name": "Corvane County",
+            "wikidata_id": "Q951830274"
+          },
+          "region": {
+            "mapbox_id": "dXJuOm1ieHBsYzpIdFp3",
+            "name": "Montana",
+            "wikidata_id": "Q962405183",
+            "region_code": "MT",
+            "region_code_full": "US-MT"
+          },
+          "country": {
+            "mapbox_id": "dXJuOm1ieHBsYzpRbTQ",
+            "name": "United States",
+            "wikidata_id": "Q940117302",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          }
+        }
+      }
+    }
+  ],
+  "attribution": "NOTICE: © 2025 Mapbox and its suppliers. This is a synthetic test response in the documented shape. The terms for real data are published by Mapbox (https://www.mapbox.com/about/maps/). Nothing in this response describes a real place."
+}

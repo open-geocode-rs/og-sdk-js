@@ -1,0 +1,172 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [
+          -123.2071468,
+          44.0518327
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "name": "Tarnbrew",
+        "mapbox_id": "dXJuOm1ieHBvaTo5M2M1ZTdhMS1kMjRiLTQ4MDYtYmYzOS0xYTZkMGM4ZTUyZjc",
+        "feature_type": "poi",
+        "address": "742 Cinder Mill Road",
+        "full_address": "742 Cinder Mill Road, Oakhollow, Oregon 97388, United States",
+        "place_formatted": "Oakhollow, Oregon 97388, United States",
+        "context": {
+          "country": {
+            "name": "United States",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          },
+          "region": {
+            "name": "Oregon",
+            "region_code": "OR",
+            "region_code_full": "US-OR"
+          },
+          "postcode": {
+            "id": "dXJuOm1ieHBsYzpQek9rNkE",
+            "name": "97388"
+          },
+          "place": {
+            "id": "dXJuOm1ieHBsYzpPa0h3M1E",
+            "name": "Oakhollow"
+          },
+          "address": {
+            "name": "742 Cinder Mill Road",
+            "address_number": "742",
+            "street_name": "Cinder Mill Road"
+          },
+          "street": {
+            "name": "Cinder Mill Road"
+          }
+        },
+        "coordinates": {
+          "latitude": 44.0518327,
+          "longitude": -123.2071468,
+          "routable_points": [
+            {
+              "name": "POI",
+              "latitude": 44.05181462037518,
+              "longitude": -123.20733915284067
+            }
+          ]
+        },
+        "language": "en",
+        "maki": "bakery",
+        "poi_category": [
+          "bakery",
+          "café",
+          "coffee shop",
+          "food and drink",
+          "food"
+        ],
+        "poi_category_ids": [
+          "bakery",
+          "cafe",
+          "coffee_shop",
+          "food_and_drink",
+          "food"
+        ],
+        "brand": [
+          "Tarnbrew",
+          "塔恩布鲁",
+          "ターンブリュー",
+          "ทาร์นบรูว์",
+          "تارنبرو"
+        ],
+        "brand_id": [
+          "tarnbrew"
+        ],
+        "external_ids": {
+          "provider": "prv-7f31c9d2e4"
+        },
+        "metadata": {
+          "phone": "+1 541 555 0137",
+          "website": "https://tarnbrew.example/oakhollow",
+          "open_hours": {
+            "periods": [
+              {
+                "open": {
+                  "day": 0,
+                  "time": "0700"
+                },
+                "close": {
+                  "day": 0,
+                  "time": "1800"
+                }
+              },
+              {
+                "open": {
+                  "day": 1,
+                  "time": "0615"
+                },
+                "close": {
+                  "day": 1,
+                  "time": "1930"
+                }
+              },
+              {
+                "open": {
+                  "day": 2,
+                  "time": "0615"
+                },
+                "close": {
+                  "day": 2,
+                  "time": "1930"
+                }
+              },
+              {
+                "open": {
+                  "day": 3,
+                  "time": "0615"
+                },
+                "close": {
+                  "day": 3,
+                  "time": "1930"
+                }
+              },
+              {
+                "open": {
+                  "day": 4,
+                  "time": "0615"
+                },
+                "close": {
+                  "day": 4,
+                  "time": "1930"
+                }
+              },
+              {
+                "open": {
+                  "day": 5,
+                  "time": "0615"
+                },
+                "close": {
+                  "day": 5,
+                  "time": "2100"
+                }
+              },
+              {
+                "open": {
+                  "day": 6,
+                  "time": "0700"
+                },
+                "close": {
+                  "day": 6,
+                  "time": "2100"
+                }
+              }
+            ]
+          }
+        },
+        "distance": 6427
+      }
+    }
+  ],
+  "attribution": "© 2026 Mapbox and its suppliers. This is a synthetic test response in the documented shape. (https://www.mapbox.com/about/maps/)",
+  "response_id": "Hq9dUe2RkXw5-bN7yZs0LmC4vTgP1aFj8oIc3nWrE_6M"
+}
