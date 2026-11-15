@@ -376,7 +376,7 @@ describe("reverse", () => {
         countryCode: "US",
       },
     });
-    expect(place.distance).toBe(distance(point, { lat: 44.3127465, lon: -72.6418273 }));
+    expect(place.distance).toBe(0.06);
     expect(place.distance).toBeLessThan(1);
   });
 
@@ -831,7 +831,7 @@ describe("batch", () => {
     const place = result.items[0]!.results[0]!;
     expect(result.items[0]!.id).toBe("r");
     expect(place.name).toBe("27 Orchard Wynd");
-    expect(place.distance).toBe(distance(point, place.location!));
+    expect(place.distance).toBe(Math.round(distance(point, place.location!) * 100) / 100);
   });
 });
 

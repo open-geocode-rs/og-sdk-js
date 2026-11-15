@@ -182,7 +182,7 @@ Anywhere else it is measured here, from the reverse point or from `focus` to the
 | `location`       | all     | g r p l  | g r p l  | all     | all         |
 | `accuracy`       | all     | g r      | g r p l  | all     | all         |
 | `confidence`     | all     | no       | no       | g       | no          |
-| `distance`       | g r a p | r a p    | r a p    | g r a p | r a         |
+| `distance`       | g r a p | r a      | r a p    | g r a p | r a         |
 | `address`        | all     | g r p l  | all      | all     | all         |
 | `bbox`           | no      | g r p l  | g r p l  | all     | no          |
 | `context`        | all     | no       | all      | no      | no          |

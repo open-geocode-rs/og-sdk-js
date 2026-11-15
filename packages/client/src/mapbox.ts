@@ -18,7 +18,6 @@ import {
   type BatchContext,
   chunk,
   createTransport,
-  distance,
   emptyAddress,
   type NativeRequest,
   nativeRequest,
@@ -330,14 +329,9 @@ function label(p: Properties, name: string): string {
 
 /**
  * One feature or suggestion as a place.
- * `position` is the feature's GeoJSON point, and `origin` the point a reverse call asked about.
+ * `position` is the feature's GeoJSON point.
  */
-function toPlace(
-  p: Properties,
-  raw: unknown,
-  position?: readonly number[],
-  origin?: LatLon,
-): PlaceRecord {
+function toPlace(p: Properties, raw: unknown, position?: readonly number[]): PlaceRecord {
   const around = p.context ?? {};
   const precision = p.coordinates?.accuracy;
   const type: PlaceType =
@@ -383,10 +377,8 @@ function toPlace(
     location,
     accuracy: (precision === undefined ? undefined : ACCURACY[precision]) ?? null,
     confidence: null,
-    distance:
-      p.distance ??
-      // Mapbox's reverse sends no distance, and the two points give it exactly.
-      (origin !== undefined && location !== null ? distance(origin, location) : null),
+    // Search Box sends a distance. Geocoding sends none, and the Geocoder measures it.
+    distance: p.distance ?? null,
     address,
     bbox: p.bbox?.length === 4 ? (p.bbox as [number, number, number, number]) : null,
     context,
@@ -421,17 +413,16 @@ function toPlace(
 function toPlaces(
   records: readonly { properties: Properties; raw: unknown; position?: readonly number[] }[],
   request: BaseRequest,
-  origin?: LatLon,
 ): PlaceRecord[] {
   const places = records
     .filter((record) => !NOT_PLACES.has(record.properties.feature_type))
-    .map((record) => toPlace(record.properties, record.raw, record.position, origin));
+    .map((record) => toPlace(record.properties, record.raw, record.position));
   const { types } = request;
   // Mapbox's types are coarser than the unified ones, so the exact filter is applied here.
   return types === undefined ? places : places.filter((place) => types.includes(place.type));
 }
 
-function features(body: Collection, request: BaseRequest, origin?: LatLon): PlaceRecord[] {
+function features(body: Collection, request: BaseRequest): PlaceRecord[] {
   return toPlaces(
     (body.features ?? []).map((feature) => ({
       properties: feature.properties,
@@ -439,7 +430,6 @@ function features(body: Collection, request: BaseRequest, origin?: LatLon): Plac
       ...(feature.geometry?.coordinates ? { position: feature.geometry.coordinates } : {}),
     })),
     request,
-    origin,
   );
 }
 
@@ -527,13 +517,9 @@ function backward(request: BaseRequest, point: LatLon): Record<string, unknown> 
   };
 }
 
-function collection(
-  answer: WithResponse<Collection>,
-  base: BaseRequest,
-  origin?: LatLon,
-): AdapterResult {
+function collection(answer: WithResponse<Collection>, base: BaseRequest): AdapterResult {
   return {
-    results: features(answer.data, base, origin),
+    results: features(answer.data, base),
     attribution: credits(answer.data.attribution),
     raw: answer.data,
     response: answer.response,
@@ -558,7 +544,6 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
   async function batch(
     queries: readonly Record<string, unknown>[],
     context: BatchContext,
-    origins?: readonly LatLon[],
   ): Promise<AdapterBatchItem[]> {
     let done = 0;
     const finished = (count: number): void => {
@@ -589,7 +574,7 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
                   body,
                 }),
               }
-            : { index, results: features(slot, context.request, origins?.[index]) };
+            : { index, results: features(slot, context.request) };
         });
         finished(rows.length);
         return items;
@@ -612,7 +597,7 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
       },
       reverse: {
         options: ["limit", "language", "countries", "types"],
-        fields: geocoding(["distance"]),
+        fields: geocoding([]),
       },
       autocomplete: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "session"],
@@ -640,7 +625,7 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
         path: "/search/geocode/v6/reverse",
         query: backward(base, base.point),
       }).withResponse();
-      return collection(answer, base, base.point);
+      return collection(answer, base);
     },
     async autocomplete(base, call) {
       const answer = await request<Suggestions>({
@@ -733,7 +718,6 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
         return batch(
           items.map((item) => backward(context.request, item)),
           context,
-          items,
         );
       },
     },

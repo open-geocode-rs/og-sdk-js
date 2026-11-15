@@ -376,7 +376,15 @@ export class Geocoder<A extends Adapter = Adapter> {
       capabilities === undefined
         ? undefined
         : (() => {
-            const plan = prepare(adapter, operation, capabilities, base, this.#strict);
+            const plan = prepare(
+              adapter,
+              operation,
+              capabilities,
+              base,
+              this.#strict,
+              // Each reverse item is its own point to measure from.
+              operation === "reverse" || base.focus !== undefined,
+            );
             const pending = native(items, {
               request: plan.request,
               options: requestOptions,
@@ -458,6 +466,7 @@ function prepare<R extends BaseRequest>(
   capabilities: OperationCapabilities,
   request: R,
   strict: boolean,
+  measured: boolean = origin(request) !== undefined,
 ): { request: R; unavailable: FieldName[]; ignored: OptionName[] } {
   const supported = new Set<OptionName>(capabilities.options);
   const sent: R = { ...request };
@@ -481,7 +490,7 @@ function prepare<R extends BaseRequest>(
     });
   const fields = new Set<FieldName>(capabilities.fields);
   // A distance can be measured wherever there is a location and a point to measure from.
-  if (fields.has("location") && origin(request) !== undefined) fields.add("distance");
+  if (fields.has("location") && measured) fields.add("distance");
   const unavailable = [...CORE_FIELDS, ...request.include].filter(
     (field) => field !== "raw" && !fields.has(field),
   );

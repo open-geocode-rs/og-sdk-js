@@ -15,7 +15,6 @@ import {
   type AdapterOptions,
   type AdapterResult,
   createTransport,
-  distance,
   emptyAddress,
   type NativeRequest,
   nativeRequest,
@@ -438,8 +437,8 @@ function nameOf(source: Result, type: PlaceType, address: Address): string {
   return text(own?.longText) ?? source.formattedAddress ?? "";
 }
 
-/** The fields a Geocoding result and a place share. `from` is the point `distance` is measured from. */
-function toPlace(source: Result, from: LatLon | undefined): PlaceRecord {
+/** The fields a Geocoding result and a place share. */
+function toPlace(source: Result): PlaceRecord {
   const type = toType(source.types);
   const address = toAddress(source);
   const name = nameOf(source, type, address);
@@ -463,8 +462,8 @@ function toPlace(source: Result, from: LatLon | undefined): PlaceRecord {
     location,
     accuracy: ACCURACY.get(source.granularity ?? "") ?? null,
     confidence: null,
-    // Google sends no distance for these. This is the great-circle one between the two points that define it.
-    distance: from === undefined || location === null ? null : distance(from, location),
+    // Google sends no distance for these, so the Geocoder measures it.
+    distance: null,
     address,
     // The viewport is the box Google frames the result with. `bounds` is the feature's own extent.
     bbox: box(source.viewport) ?? box(source.bounds),
@@ -500,8 +499,8 @@ function accessPoints(source: Result): AccessPoint[] | null {
 }
 
 /** A place with the fields only Places has. */
-function toDetailedPlace(source: Result, from: LatLon | undefined): PlaceRecord {
-  const place = toPlace(source, from);
+function toDetailedPlace(source: Result): PlaceRecord {
+  const place = toPlace(source);
   const phone = text(source.internationalPhoneNumber);
   const website = text(source.websiteUri);
   const hours = source.regularOpeningHours?.weekdayDescriptions ?? [];
@@ -600,7 +599,6 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
     path: string,
     query: URLSearchParams,
     request: { language?: string[]; include: Include[]; types?: PlaceType[] },
-    from: LatLon | undefined,
     call: RequestOptions | undefined,
   ): Promise<AdapterResult> {
     const language = request.language?.[0];
@@ -611,10 +609,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       query,
     }).withResponse();
     return {
-      results: ofTypes(
-        (answer.data.results ?? []).map((result) => toPlace(result, from)),
-        request.types,
-      ),
+      results: ofTypes((answer.data.results ?? []).map(toPlace), request.types),
       raw: answer.data,
       response: answer.response,
       requestId: answer.requestId,
@@ -628,7 +623,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
     native: { places, geocoding },
     capabilities: {
       geocode: { options: [...geocodeOptions, "structured"], fields: GEOCODE_FIELDS },
-      reverse: { options: geocodeOptions, fields: [...GEOCODE_FIELDS, "distance"] },
+      reverse: { options: geocodeOptions, fields: GEOCODE_FIELDS },
       autocomplete: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "session"],
         fields: ["id", "distance", "highlights"],
@@ -636,7 +631,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       },
       places: {
         options: ["limit", "language", "focus", "bounds", "types"],
-        fields: [...PLACE_FIELDS, "distance"],
+        fields: PLACE_FIELDS,
       },
       lookup: { options: ["language", "session"], fields: PLACE_FIELDS },
     },
@@ -646,20 +641,13 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
             `/v4/geocode/address/${encodeURIComponent(request.query ?? "")}`,
             new URLSearchParams(),
             request,
-            undefined,
             call,
           )
-        : geocoded("/v4/geocode/address", addressParams(request.address), request, undefined, call);
+        : geocoded("/v4/geocode/address", addressParams(request.address), request, call);
     },
     reverse(request, call) {
       const { lat, lon } = request.point;
-      return geocoded(
-        `/v4/geocode/location/${lat},${lon}`,
-        new URLSearchParams(),
-        request,
-        request.point,
-        call,
-      );
+      return geocoded(`/v4/geocode/location/${lat},${lon}`, new URLSearchParams(), request, call);
     },
     async autocomplete(request, call) {
       const { focus, bounds, include } = request;
@@ -733,10 +721,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
         idempotent: true,
       }).withResponse();
       return {
-        results: ofTypes(
-          (answer.data.places ?? []).map((place) => toDetailedPlace(place, focus)),
-          request.types,
-        ),
+        results: ofTypes((answer.data.places ?? []).map(toDetailedPlace), request.types),
         raw: answer.data,
         response: answer.response,
         requestId: answer.requestId,
@@ -778,7 +763,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       if (failures.length > 0) throw failures[0];
       const found = answers.filter((answer) => answer !== undefined);
       return {
-        results: found.map((place) => toDetailedPlace(place, undefined)),
+        results: found.map(toDetailedPlace),
         // One body per ID found, since each ID is its own request.
         raw: found,
         response,

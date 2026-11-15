@@ -244,7 +244,7 @@ describe("the google adapter", () => {
           location,
           accuracy: "rooftop",
           confidence: null,
-          distance: distance(at, location),
+          distance: Math.round(distance(at, location) * 100) / 100,
           address: mountainView,
           bbox: [
             wire.viewport.low.longitude,
@@ -477,9 +477,7 @@ describe("the google adapter", () => {
       const geo = geocoder(fetch);
       const answer = await geo.places("Googleplex", { limit: 1, types: ["poi"], focus });
       expect(body(fetch)).not.toHaveProperty("pageSize");
-      expect(answer.results[0]!.distance).toBe(
-        distance(focus, { lat: 37.4220541, lon: -122.08532419999999 }),
-      );
+      expect(answer.results[0]!.distance).toBe(522.72);
       expect((await geo.places("Googleplex", { types: ["locality"] })).results).toEqual([]);
     });
   });
