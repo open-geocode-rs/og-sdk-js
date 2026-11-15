@@ -348,6 +348,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A point to route to when going to a result. */
+        AccessPoint: {
+            /**
+             * @description What kind of way in it is, as the value of the OpenStreetMap
+             *     `entrance` tag that maps it, such as `main`, `yes`, `service` or
+             *     `staircase`.
+             * @example main
+             */
+            kind: string;
+            /**
+             * Format: double
+             * @example 43.7396
+             */
+            lat: number;
+            /**
+             * Format: double
+             * @example 7.4263
+             */
+            lon: number;
+        };
         /**
          * @description How precisely the coordinates locate the result, most precise first.
          *
@@ -437,9 +457,58 @@ export interface components {
         };
         /** @description Properties shared by forward and reverse results. */
         Common: {
+            /**
+             * @description The points to route to when going to the result, which are the
+             *     entrances OpenStreetMap maps for it. They are the nodes tagged
+             *     `entrance` on the outline of the building or site an address or a
+             *     POI is drawn with, or the result's own point when its node is so
+             *     tagged. Absent when OpenStreetMap maps none, and on every other
+             *     layer.
+             * @example [
+             *       {
+             *         "kind": "main",
+             *         "lat": 43.7396,
+             *         "lon": 7.4263
+             *       }
+             *     ]
+             */
+            access?: components["schemas"]["AccessPoint"][];
             accuracy: components["schemas"]["Accuracy"];
             /** @description Address parts stated by the source record. */
             address?: components["schemas"]["Address"];
+            /**
+             * @description The address as the lines of a postal address, top to bottom, the way
+             *     the result's country writes one. The country's address template
+             *     says which parts go on which line and in what order. Each part is
+             *     what `address` states or, where it states none, the area of
+             *     `context`, and a part og has nothing for is left out. A region is
+             *     its ISO 3166-2 short code where the template asks for one. The last
+             *     line names the country as `context.country` does, so `lang` names it
+             *     too. Present on an address with its house number, and on a POI that
+             *     states its street. Absent on every other layer, and on a result in
+             *     no country og has a template for.
+             * @example [
+             *       "10 King Street West",
+             *       "Toronto, ON M5H 1A1",
+             *       "Canada"
+             *     ]
+             */
+            address_lines?: string[];
+            /**
+             * @description The box around a result that covers more than a point, as `[west,
+             *     south, east, north]` in degrees. It holds an area's outline, a
+             *     street's line, or the outline a POI is drawn with. It is the
+             *     narrowest box, so for a result that crosses the antimeridian `west`
+             *     is greater than `east`, and only then. Absent on a result that is
+             *     only a point.
+             * @example [
+             *       7.4090279,
+             *       43.7247599,
+             *       7.4398704,
+             *       43.7519311
+             *     ]
+             */
+            bbox?: number[];
             /**
              * @description The chain a place belongs to, when its name may not say: "Tankstation
              *     Zanoli" is an Esso. Present only on places.
@@ -447,6 +516,12 @@ export interface components {
             brand?: components["schemas"]["Brand"];
             /** @description POI category, such as `amenity:cafe`. Present only on POIs. */
             category?: string;
+            /**
+             * @description How to reach a place: its phone number, website and email, each as
+             *     its source writes it. og rewrites none and does not check that one
+             *     still answers. Present only on POIs that state at least one.
+             */
+            contact?: components["schemas"]["Contact"];
             /** @description Administrative areas containing the result. */
             context?: components["schemas"]["Context"];
             /**
@@ -463,11 +538,28 @@ export interface components {
              */
             name: string;
             /**
+             * @description When a place is open, in OpenStreetMap's `opening_hours` syntax as
+             *     its source writes it. og does not parse it, so it never says whether
+             *     the place is open now. Present only on POIs that state it.
+             * @example Mo-Fr 08:00-18:00; Sa 09:00-13:00
+             */
+            opening_hours?: string;
+            /**
              * @description The class of road a street is, the most important of its ways, such
              *     as `motorway` or `residential`. Present only on streets.
              */
             road_class?: components["schemas"]["RoadClass"];
             source: components["schemas"]["Source"];
+            /**
+             * @description The IANA name of the timezone the result lies in, such as
+             *     `Europe/Monaco`. Its offset from UTC is the reader's to compute,
+             *     as it changes with the date. An area's is the zone it lies wholly in,
+             *     and any other result's is the zone at its point. Absent on an area
+             *     that reaches into two zones, where the timezone boundaries name no
+             *     zone or two, and on every result of a Pack built without them.
+             * @example Europe/Monaco
+             */
+            timezone?: string;
             /**
              * @description The result's name in each further language `lang` asks for, by the
              *     code as asked. Present only when `lang` names more than one language
@@ -479,6 +571,19 @@ export interface components {
             translations?: {
                 [key: string]: string;
             };
+        };
+        /**
+         * @description How to reach a place, each value as its source writes it: a phone number
+         *     in any spelling, a website with or without its scheme. og rewrites none
+         *     of them and does not check that one still answers.
+         */
+        Contact: {
+            /** @example hello@queenbakery.example */
+            email?: string;
+            /** @example +1 416-555-0111 */
+            phone?: string;
+            /** @example https://queenbakery.example/ */
+            website?: string;
         };
         /**
          * @description Areas containing the result, one per tier, most specific first. A tier
@@ -588,6 +693,22 @@ export interface components {
              */
             fallback?: boolean;
             /**
+             * @description The parts of `label` the typed text matched, in order, none
+             *     overlapping. Present on `/autocomplete` results, the only ones found
+             *     by text still being typed. Absent when no typed word can be placed
+             *     in the label, as on a place suggested for its category.
+             */
+            highlights?: components["schemas"]["Highlight"][];
+            /**
+             * @description How each address part the query states matched the result. Present
+             *     on a `/geocode` result found by reading the query as an address,
+             *     when it states a part. Absent on a result found by its whole name,
+             *     and on `/places` and `/autocomplete`. A place is sought by its name
+             *     and a suggestion by what is typed so far, which no address reading
+             *     judges.
+             */
+            match?: components["schemas"]["QueryMatch"];
+            /**
              * Format: float
              * @description Text relevance. Higher is better. Comparable only within one
              *     response: use `confidence` to judge a single result.
@@ -653,6 +774,23 @@ export interface components {
              * @example Ontario
              */
             region?: string;
+        };
+        /**
+         * @description A range of a result's `label` that the typed text matched.
+         *
+         *     `start` and `end` count Unicode scalar values from the start of the
+         *     label, `end` exclusive. They are not bytes and not UTF-16 code units, so
+         *     a client converts them to the offsets its strings use.
+         *
+         *     Search matches typed words against the record, not against the label,
+         *     so each typed word is placed by finding it again in the label, cut into
+         *     words and folded as the index folds text. `elysee` marks `Élysée`. A
+         *     word still being typed marks only the letters typed so far, and a word
+         *     matched through a typo marks the whole label word.
+         */
+        Highlight: {
+            end: number;
+            start: number;
         };
         /** @description A rejected parameter. */
         InvalidParam: {
@@ -756,6 +894,17 @@ export interface components {
             schema_version: number;
         };
         /**
+         * @description How one stated address part matched a result, best first.
+         *
+         *     - `matched`: the result has the value the query states, after
+         *       normalisation such as case, accents and abbreviations.
+         *     - `partial`: the result's value differs and was accepted as the same.
+         *     - `unmatched`: the result does not have the part, has another value, or
+         *       nothing says it has the stated one.
+         * @enum {string}
+         */
+        PartMatch: "matched" | "partial" | "unmatched";
+        /**
          * @description One item of a `/places` batch: `GET /places`' parameters and an `id`.
          *
          *     Every field is optional here because the request's query string may give
@@ -841,6 +990,51 @@ export interface components {
              * @example about:blank
              */
             type: string;
+        };
+        /**
+         * @description How each address part a query states matched one result. A part the
+         *     query does not state is absent, whatever the result holds for it. Every
+         *     result fills in parts the query left out, so naming them says nothing.
+         *     The query's parts are the ones its reading labels, so no query states a
+         *     district.
+         *
+         *     What judges each part is listed below.
+         *
+         *     - `housenumber`: `matched` when the result states the number.
+         *       `partial` when the number is placed on a range or between its
+         *       neighbours, or the result states the number the stated one starts
+         *       with (`407` for `407a`). `unmatched` when a street or an area answers
+         *       for it.
+         *     - `street`: the query's street words against the words of the result's
+         *       street, as search counts typos. `matched` when the street has each
+         *       word, or the word an abbreviation stands for. `partial` when a word is
+         *       a typo away or missing. `unmatched` when it has none of them or the
+         *       result has no street.
+         *     - `unit`: `matched` when the result states the unit, else `unmatched`.
+         *     - `locality`: `matched` when an area the result lies in has the name.
+         *       `partial` when the name is read through a typo, is the postal town of
+         *       the stated postcode, or is a settlement mapped as a point beside the
+         *       result. `unmatched` when the result lies elsewhere or the Pack does
+         *       not know the name.
+         *     - `region` and `country`: `matched` when the result lies in the one
+         *       named, `partial` when the name is read through a typo, `unmatched`
+         *       when the Pack does not know the name.
+         *     - `postcode`: `matched` when the result or its street states the
+         *       postcode. `partial` when one starts the other, or the result only
+         *       lies where the postcode does. `unmatched` when the result states
+         *       another or nothing places it.
+         *
+         *     On a `fallback` result the parts the area answers for are judged, and
+         *     every other stated part is `unmatched`.
+         */
+        QueryMatch: {
+            country?: components["schemas"]["PartMatch"];
+            housenumber?: components["schemas"]["PartMatch"];
+            locality?: components["schemas"]["PartMatch"];
+            postcode?: components["schemas"]["PartMatch"];
+            region?: components["schemas"]["PartMatch"];
+            street?: components["schemas"]["PartMatch"];
+            unit?: components["schemas"]["PartMatch"];
         };
         /** @description A reverse batch's answer: one result per item, in input order. */
         ReverseBatch: {
