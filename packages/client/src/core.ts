@@ -3,7 +3,6 @@ import {
   APIConnectionTimeoutError,
   APIUserAbortError,
   OgError,
-  type Problem,
 } from "./errors.ts";
 
 /** How much the client logs. */
@@ -30,9 +29,9 @@ export interface RequestOptions {
 }
 
 /** A parsed response together with the raw `Response`. */
-export interface WithResponse<T> {
+export interface WithResponse<T, R extends Response | undefined = Response> {
   data: T;
-  response: Response;
+  response: R;
   requestId: string | undefined;
 }
 
@@ -42,6 +41,12 @@ const LEVELS: Record<LogLevel, number> = { off: 0, error: 1, warn: 2, info: 3, d
 const RETRY_STATUSES = new Set([408, 429]);
 
 export interface TransportOptions {
+  /** The provider's name, used in log lines and error messages. Default `og`. */
+  name?: string | undefined;
+  /** Reads a message out of the provider's error body. */
+  describeError?: ((body: unknown, status: number) => string | undefined) | undefined;
+  /** Response headers that may hold the provider's request ID, in order of preference. Default `x-request-id`. */
+  requestIdHeaders?: readonly string[] | undefined;
   baseUrl: string;
   headers: Record<string, string>;
   fetch: typeof globalThis.fetch;
@@ -52,9 +57,10 @@ export interface TransportOptions {
 }
 
 export interface Call {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  /** A path under the transport's `baseUrl`, or an absolute URL. */
   path: string;
-  query?: Record<string, unknown>;
+  query?: Record<string, unknown> | URLSearchParams;
   body?: string;
   headers?: Record<string, string>;
   /** Whether a retry can repeat the call safely. Job creation cannot. */
@@ -62,11 +68,15 @@ export interface Call {
   options: RequestOptions | undefined;
 }
 
-function toSearch(query: Record<string, unknown> | undefined): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === null) continue;
-    search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+function toSearch(query: Record<string, unknown> | URLSearchParams | undefined): string {
+  let search: URLSearchParams;
+  if (query instanceof URLSearchParams) search = query;
+  else {
+    search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value === undefined || value === null) continue;
+      search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+    }
   }
   const text = search.toString();
   return text === "" ? "" : `?${text}`;
@@ -101,20 +111,33 @@ export function retryDelay(attempt: number, headers: Headers | undefined): numbe
 
 export class Transport {
   readonly #options: TransportOptions;
+  readonly #name: string;
 
   constructor(options: TransportOptions) {
     this.#options = options;
+    this.#name = options.name ?? "og";
+  }
+
+  /** The provider's request ID from a response, if it sent one. */
+  requestId(headers: Headers): string | undefined {
+    for (const name of this.#options.requestIdHeaders ?? ["x-request-id"]) {
+      const value = headers.get(name);
+      if (value) return value;
+    }
+    return undefined;
   }
 
   log(level: Exclude<LogLevel, "off">, message: string, ...rest: unknown[]): void {
     if (LEVELS[level] <= LEVELS[this.#options.logLevel])
-      this.#options.logger[level](`[og] ${message}`, ...rest);
+      this.#options.logger[level](`[${this.#name}] ${message}`, ...rest);
   }
 
   /** Sends a call, retrying where safe, and returns the successful `Response`. */
   async send(call: Call): Promise<Response> {
     const { options } = call;
-    const url = `${this.#options.baseUrl}${call.path}${toSearch(call.query)}`;
+    const base = /^https?:\/\//.test(call.path) ? "" : this.#options.baseUrl;
+    const url = `${base}${call.path}${toSearch(call.query)}`;
+    const provider = this.#name;
     const maxRetries = call.idempotent ? (options?.maxRetries ?? this.#options.maxRetries) : 0;
     const timeout = options?.timeout ?? this.#options.timeout;
     for (let attempt = 0; ; attempt++) {
@@ -137,10 +160,13 @@ export class Transport {
         });
       } catch (cause) {
         if (options?.signal?.aborted)
-          throw new APIUserAbortError("Request was aborted.", { cause });
+          throw new APIUserAbortError("Request was aborted.", { cause, provider });
         const error = timer.aborted
-          ? new APIConnectionTimeoutError(`og did not answer within ${timeout} ms.`, { cause })
-          : new APIConnectionError("Could not reach og.", { cause });
+          ? new APIConnectionTimeoutError(`${provider} did not answer within ${timeout} ms.`, {
+              cause,
+              provider,
+            })
+          : new APIConnectionError(`Could not reach ${provider}.`, { cause, provider });
         if (attempt < maxRetries) {
           const wait = retryDelay(attempt, undefined);
           this.log("info", `${error.message} Retrying in ${Math.round(wait)} ms.`);
@@ -153,18 +179,26 @@ export class Transport {
       const retryable = RETRY_STATUSES.has(response.status) || response.status >= 500;
       if (retryable && attempt < maxRetries) {
         const wait = retryDelay(attempt, response.headers);
-        this.log("info", `og answered ${response.status}. Retrying in ${Math.round(wait)} ms.`);
+        this.log(
+          "info",
+          `${provider} answered ${response.status}. Retrying in ${Math.round(wait)} ms.`,
+        );
         await response.body?.cancel();
         await sleep(wait, options?.signal);
         continue;
       }
-      let problem: Problem | undefined;
+      let body: unknown;
+      const text = await response.text().catch(() => "");
       try {
-        problem = (await response.json()) as Problem;
+        body = JSON.parse(text);
       } catch {
-        problem = undefined;
+        body = text === "" ? undefined : text;
       }
-      const error = OgError.fromResponse(response.status, problem, response.headers);
+      const error = OgError.fromResponse(response.status, body, response.headers, {
+        provider,
+        message: this.#options.describeError?.(body, response.status),
+        requestId: this.requestId(response.headers),
+      });
       this.log(
         response.status >= 500 ? "error" : "warn",
         `${call.method} ${call.path}: ${error.message}`,
@@ -179,15 +213,22 @@ export class Transport {
  * `withResponse()` for the data with the raw `Response`, or `asResponse()` for the
  * raw `Response` with its body unread.
  */
-export class APIPromise<T> extends Promise<T> {
-  readonly #response: Promise<Response>;
-  readonly #parse: (response: Response) => Promise<T>;
-  #parsed: Promise<WithResponse<T>> | undefined;
+export class APIPromise<T, R extends Response | undefined = Response> extends Promise<T> {
+  readonly #response: Promise<R>;
+  readonly #parse: (response: R) => Promise<T>;
+  readonly #requestId: (response: R) => string | undefined;
+  #parsed: Promise<WithResponse<T, R>> | undefined;
 
-  constructor(response: Promise<Response>, parse: (response: Response) => Promise<T>) {
+  constructor(
+    response: Promise<R>,
+    parse: (response: R) => Promise<T>,
+    requestId: (response: R) => string | undefined = (answer) =>
+      answer?.headers.get("x-request-id") ?? undefined,
+  ) {
     super((resolve) => resolve(undefined as T));
     this.#response = response;
     this.#parse = parse;
+    this.#requestId = requestId;
     // Rejections surface through then(), withResponse() or asResponse(), never as unhandled.
     response.catch(() => {});
   }
@@ -196,17 +237,17 @@ export class APIPromise<T> extends Promise<T> {
     return Promise;
   }
 
-  /** The raw `Response`, body unread. */
-  asResponse(): Promise<Response> {
+  /** The raw `Response`. Its body is unread on the og client, and already read on a `Geocoder` call. */
+  asResponse(): Promise<R> {
     return this.#response;
   }
 
-  /** The parsed data, the raw `Response` and og's request ID. */
-  withResponse(): Promise<WithResponse<T>> {
+  /** The parsed data, the raw `Response` and the provider's request ID. */
+  withResponse(): Promise<WithResponse<T, R>> {
     this.#parsed ??= this.#response.then(async (response) => ({
       data: await this.#parse(response),
       response,
-      requestId: response.headers.get("x-request-id") ?? undefined,
+      requestId: this.#requestId(response),
     }));
     return this.#parsed;
   }
