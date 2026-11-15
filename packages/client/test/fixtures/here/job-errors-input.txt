@@ -1,0 +1,2 @@
+recId|errorCode|errorMessage
+InputLine_1|999|{"status":999,"recordId":"InputLine_1","title":"Input line rejected","cause":"The line does not follow the input format declared for the job.","action":"Correct the record, then send it in a new job.","jobRecord":"1,\"Elmelyvej 73, 6999 Ravnsbæk,DNK"}

@@ -1,0 +1,7 @@
+{
+  "id": "JOB-c63f0a18-947d-4b25-a3e7-58d1b0f92e6c",
+  "serviceHrn": "hrn:here:service::olp-here:search-revgeocode-7",
+  "billingTags": [],
+  "status": "stopped",
+  "href": "https://batch.search.hereapi.com/v7/batch/jobs/JOB-c63f0a18-947d-4b25-a3e7-58d1b0f92e6c"
+}

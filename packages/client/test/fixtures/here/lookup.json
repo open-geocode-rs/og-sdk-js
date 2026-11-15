@@ -1,0 +1,27 @@
+{
+  "title": "Station Merelveen",
+  "id": "here:pds:place:528u1k4f-9a62d7e0c3b54815bf07e2d4c618a93b",
+  "resultType": "place",
+  "address": {
+    "label": "Station Merelveen, 1999 ZZ Merelveen, Nederland",
+    "countryCode": "NLD",
+    "countryName": "Nederland",
+    "stateCode": "GE",
+    "state": "Gelderland",
+    "countyCode": "HGL",
+    "county": "Hoogerlanden",
+    "city": "Merelveen",
+    "postalCode": "1999 ZZ"
+  },
+  "position": { "lat": 52.18342, "lng": 5.90417 },
+  "access": [{ "lat": 52.18296, "lng": 5.90355 }],
+  "categories": [{ "id": "400-4100-0035", "name": "Treinstation", "primary": true }],
+  "references": [{ "supplier": { "id": "core" }, "id": "71935208" }],
+  "contacts": [
+    {
+      "phone": [{ "value": "+31555550142" }],
+      "www": [{ "value": "http://www.station-merelveen.example" }],
+      "email": [{ "value": "info@station-merelveen.example" }]
+    }
+  ]
+}

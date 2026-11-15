@@ -1,0 +1,53 @@
+{
+  "items": [
+    {
+      "title": "Park",
+      "id": "here:cm:ontology:park",
+      "resultType": "categoryQuery",
+      "href": "https://autosuggest.search.hereapi.com/v1/discover?at=35.48213%2C-97.61054&limit=5&q=Park&_ontology=park",
+      "highlights": { "title": [{ "start": 0, "end": 4 }] }
+    },
+    {
+      "title": "Parking lot",
+      "id": "here:cm:ontology:parking_lot",
+      "resultType": "categoryQuery",
+      "href": "https://autosuggest.search.hereapi.com/v1/discover?at=35.48213%2C-97.61054&limit=5&q=Parking+lot&_ontology=parking_lot",
+      "highlights": { "title": [{ "start": 0, "end": 4 }] }
+    },
+    {
+      "title": "Parkhollow Print Works",
+      "id": "here:pds:place:8409y6kq-7c3e91b5d2a84f6fb0e4a15c9d72e386",
+      "resultType": "place",
+      "address": { "label": "Parkhollow Print Works, 2714 N Osprey Ave, Harrowmere, OK 73999-4102, United States" },
+      "position": { "lat": 35.46877, "lng": -97.60391 },
+      "access": [{ "lat": 35.46902, "lng": -97.60448 }],
+      "distance": 1601,
+      "categories": [{ "id": "600-6700-0087", "name": "Bookstore", "primary": true }, { "id": "600-6900-0096", "name": "Specialty Store" }],
+      "highlights": { "title": [{ "start": 0, "end": 4 }], "address": { "label": [{ "start": 0, "end": 4 }] } }
+    },
+    {
+      "title": "Glassmere Frames (Park Lane Frames)",
+      "id": "here:pds:place:8409y6m2-e15a07c4b93d4d28a6f1c8072b5d94a0",
+      "resultType": "place",
+      "address": { "label": "Glassmere Frames, 906 Wexcombe Rd, Harrowmere, OK 73999-2260, United States" },
+      "position": { "lat": 35.50942, "lng": -97.61588 },
+      "access": [{ "lat": 35.50931, "lng": -97.61563 }],
+      "distance": 3073,
+      "categories": [{ "id": "600-6900-0096", "name": "Specialty Store", "primary": true }, { "id": "300-3100-0000", "name": "Museum" }, { "id": "600-6700-0087", "name": "Bookstore" }],
+      "highlights": { "title": [{ "start": 18, "end": 22 }], "address": { "label": [] } }
+    },
+    {
+      "title": "Larchpark Pharmacy (Larch Park Pharmacy)",
+      "id": "here:pds:place:8409y6kx-4b8d26f0a7c1493e95d3e0f61a2c7b58",
+      "resultType": "place",
+      "address": { "label": "Larchpark Pharmacy, 5518 Dunmallow Pike, Harrowmere, OK 73999-0715, United States" },
+      "position": { "lat": 35.47604, "lng": -97.58817 },
+      "access": [{ "lat": 35.47622, "lng": -97.58829 }],
+      "distance": 2139,
+      "categories": [{ "id": "600-6400-0000", "name": "Drugstore or Pharmacy", "primary": true }, { "id": "800-8000-0000", "name": "Hospital or Health Care Facility" }, { "id": "600-6900-0096", "name": "Specialty Store" }],
+      "references": [{ "supplier": { "id": "ogsynth" }, "id": "Qm7Lx2RvTnA4kPzWc81dHg" }],
+      "highlights": { "title": [{ "start": 5, "end": 9 }, { "start": 26, "end": 30 }], "address": { "label": [{ "start": 5, "end": 9 }] } }
+    }
+  ],
+  "queryTerms": []
+}

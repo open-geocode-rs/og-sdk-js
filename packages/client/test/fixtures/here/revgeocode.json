@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "title": "Kvistmyrveien 31, 5997 Skarvøy, Norway",
+      "id": "here:af:streetsection:h7PdQ.x4LmWc9RtN0ayJsB:CgcIBCCv3M5kEAEaAjMx",
+      "resultType": "houseNumber",
+      "houseNumberType": "PA",
+      "address": {
+        "label": "Kvistmyrveien 31, 5997 Skarvøy, Norway",
+        "countryCode": "NOR",
+        "countryName": "Norway",
+        "state": "Vestland",
+        "county": "Skarvøy",
+        "city": "Skarvøy",
+        "district": "Nordre Holmen",
+        "street": "Kvistmyrveien",
+        "postalCode": "5997",
+        "houseNumber": "31"
+      },
+      "position": {
+        "lat": 60.41273,
+        "lng": 5.30846
+      },
+      "access": [
+        {
+          "lat": 60.41279,
+          "lng": 5.30853
+        }
+      ],
+      "distance": 6,
+      "mapView": {
+        "west": 5.31028,
+        "south": 60.41183,
+        "east": 5.30664,
+        "north": 60.41363
+      }
+    }
+  ]
+}

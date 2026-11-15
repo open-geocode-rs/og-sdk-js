@@ -1,0 +1,8 @@
+{
+  "title": "Unknown job",
+  "status": 404,
+  "code": "E6004041",
+  "cause": "No job exists under the ID in the path",
+  "action": "Check the job ID, then send the request again",
+  "correlationId": "b28f5c10-7e94-4d3a-a61b-0c9f3e75d842"
+}
