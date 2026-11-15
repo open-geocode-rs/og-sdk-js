@@ -7,3 +7,4 @@ __screenshots__/
 .DS_Store
 .vitest/
 docs/
+docs-preview/

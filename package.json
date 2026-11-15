@@ -21,7 +21,8 @@
     "size": "size-limit",
     "docs": "typedoc",
     "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn && cd ../treeshake && node check.mjs && cd ../runtimes && node smoke.mjs && bun smoke.mjs && bunx deno run --allow-read --allow-env smoke.mjs",
-    "docs:capabilities": "bun packages/client/scripts/write-capabilities.ts && oxfmt packages/client/README.md"
+    "docs:capabilities": "bun packages/client/scripts/write-capabilities.ts && oxfmt packages/client/README.md",
+    "docs:page": "bun packages/client/scripts/capabilities-page.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
