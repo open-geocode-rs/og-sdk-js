@@ -3,10 +3,8 @@ import {
   APIConnectionTimeoutError,
   APIUserAbortError,
   createClient,
-  Geocoder,
   type GeocoderError,
 } from "../src/index.ts";
-import { og } from "../src/og.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -49,19 +47,19 @@ describe("cancellation by the caller", () => {
     );
     controller.abort();
     const error = await caught(call);
-    expect(error).toBeInstanceOf(APIUserAbortError);
-    expect(error.cause).toBe(controller.signal.reason);
-    expect((error.cause as DOMException).name).toBe("AbortError");
+    expect(error.code).toBe("aborted");
+    const transport = error.cause as APIUserAbortError;
+    expect(transport).toBeInstanceOf(APIUserAbortError);
+    expect(transport.cause).toBe(controller.signal.reason);
+    expect((transport.cause as DOMException).name).toBe("AbortError");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("is aborted through a Geocoder, never retried, and never sent when already cancelled", async () => {
+  it("is not retryable, is never retried, and never sent when already cancelled", async () => {
     const fetch = hanging();
-    const geo = new Geocoder({
-      adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 5, ...quiet }),
-    });
+    const geo = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 5, ...quiet });
     const controller = new AbortController();
-    const call = geo.geocode("x", { signal: controller.signal });
+    const call = geo.geocode({ q: "x" }, { signal: controller.signal });
     controller.abort();
     const error = await caught(call);
     expect(error.code).toBe("aborted");
@@ -69,17 +67,15 @@ describe("cancellation by the caller", () => {
     expect(error.cause).toBeInstanceOf(APIUserAbortError);
     expect(fetch).toHaveBeenCalledTimes(1);
 
-    const late = await caught(geo.geocode("x", { signal: AbortSignal.abort() }));
+    const late = await caught(geo.geocode({ q: "x" }, { signal: AbortSignal.abort() }));
     expect(late.code).toBe("aborted");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("counts a caller's own timeout signal as a timeout", async () => {
     const fetch = hanging();
-    const geo = new Geocoder({
-      adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 3, ...quiet }),
-    });
-    const error = await caught(geo.geocode("x", { signal: AbortSignal.timeout(10) }));
+    const geo = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 3, ...quiet });
+    const error = await caught(geo.geocode({ q: "x" }, { signal: AbortSignal.timeout(10) }));
     expect(error.code).toBe("timeout");
     expect(error.cause).toBeInstanceOf(APIConnectionTimeoutError);
     expect(((error.cause as Error).cause as DOMException).name).toBe("TimeoutError");
@@ -91,11 +87,14 @@ describe("cancellation by the caller", () => {
 describe("the timeout", () => {
   it("ends the request as a timeout, with the signal's TimeoutError as the cause", async () => {
     const fetch = hanging();
-    const geo = new Geocoder({
-      adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 0, ...quiet }),
+    const geo = createClient({
+      baseUrl: "http://og.test",
+      fetch,
+      maxRetries: 0,
       timeout: 10,
+      ...quiet,
     });
-    const error = await caught(geo.geocode("x"));
+    const error = await caught(geo.geocode({ q: "x" }));
     expect(error.code).toBe("timeout");
     expect(error.message).toBe("og did not answer within 10 ms.");
     const transport = error.cause as APIConnectionTimeoutError;
@@ -106,10 +105,8 @@ describe("the timeout", () => {
   it("is still a timeout where the runtime reports it as an AbortError", async () => {
     // Some browsers fail a fetch whose timeout signal fired with an AbortError.
     const fetch = hanging(asAbortError);
-    const geo = new Geocoder({
-      adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 0, ...quiet }),
-    });
-    const error = await caught(geo.geocode("x", { timeout: 10 }));
+    const geo = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 0, ...quiet });
+    const error = await caught(geo.geocode({ q: "x" }, { timeout: 10 }));
     expect(error.code).toBe("timeout");
     expect(error.cause).toBeInstanceOf(APIConnectionTimeoutError);
     // The cause is the signal's own reason, which says what happened.
@@ -169,7 +166,7 @@ describe("a caller's abort and the timeout racing", () => {
       ...quiet,
     }).geocode({ q: "x" }, { signal: callerFirst.signal, timeout: 30, maxRetries: 0 });
     setTimeout(() => callerFirst.abort(), 5);
-    expect(await caught(first)).toBeInstanceOf(APIUserAbortError);
+    expect((await caught(first)).code).toBe("aborted");
 
     // The timeout fires first, and the caller aborts in the same instant it is handled.
     const timerFirst = new AbortController();
@@ -178,12 +175,13 @@ describe("a caller's abort and the timeout racing", () => {
       return signal.reason;
     });
     const second = await caught(
-      new Geocoder({
-        adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 3, ...quiet }),
-      }).geocode("x", {
-        signal: timerFirst.signal,
-        timeout: 10,
-      }),
+      createClient({ baseUrl: "http://og.test", fetch, maxRetries: 3, ...quiet }).geocode(
+        { q: "x" },
+        {
+          signal: timerFirst.signal,
+          timeout: 10,
+        },
+      ),
     );
     expect(second.code).toBe("timeout");
     // The caller has given up by then, so the timeout is not retried.
@@ -200,7 +198,7 @@ describe("an abort during a wait", () => {
     const call = client.geocode({ q: "x" }, { signal: controller.signal });
     setTimeout(() => controller.abort(), 20);
     const error = await caught(call);
-    expect(error).toBeInstanceOf(APIUserAbortError);
+    expect(error.code).toBe("aborted");
     expect(fetch).toHaveBeenCalledTimes(1);
     // The first retry wait is at least 375 ms, so the call ended inside it.
     expect(Date.now() - started).toBeLessThan(300);
@@ -213,56 +211,48 @@ describe("an abort during a wait", () => {
     const wait = client.jobs.wait("j1", { signal: controller.signal, interval: 10_000 });
     setTimeout(() => controller.abort(), 20);
     const error = await caught(wait);
-    expect(error).toBeInstanceOf(APIUserAbortError);
-    expect((error.cause as DOMException).name).toBe("AbortError");
+    expect(error.code).toBe("aborted");
+    expect(error.operation).toBe("jobs.wait");
+    expect(((error.cause as Error).cause as DOMException).name).toBe("AbortError");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("stops an emulated batch, and fails each item left as aborted", async () => {
+  it("stops a batch that is waiting to be retried", async () => {
+    const fetch = vi.fn<Fetch>(async () => json({}, 503));
     const controller = new AbortController();
-    let calls = 0;
-    const fetch = vi.fn<Fetch>((input, init) => {
-      if (calls++ === 0) return Promise.resolve(json(empty));
-      controller.abort();
-      return hanging()(input, init);
-    });
-    const adapter = og({ baseUrl: "http://og.test", fetch, maxRetries: 3, ...quiet });
-    // Without a batch of its own, the adapter's batch runs as single calls.
-    delete adapter.batch;
-    delete adapter.capabilities.batch;
-    const batch = await new Geocoder({ adapter }).batch.geocode(["a", "b", "c", "d"], {
-      concurrency: 1,
-      signal: controller.signal,
-    });
-    expect(batch.mode).toBe("emulated");
-    expect(batch.items.map((item) => item.error?.code ?? "ok")).toEqual([
-      "ok",
-      "aborted",
-      "aborted",
-      "aborted",
-    ]);
-    // The third and fourth items were never sent.
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("stops a native batch while its job runs, and still removes the job", async () => {
-    const controller = new AbortController();
-    const fetch = vi.fn<Fetch>((input, init) => {
-      const url = String(input);
-      if (init?.method === "POST")
-        return Promise.resolve(json({ id: "j1", status: "running" }, 202));
-      if (init?.method === "DELETE") return Promise.resolve(new Response(null, { status: 204 }));
-      if (url.endsWith("/results")) {
-        setTimeout(() => controller.abort(), 10);
-        return hanging()(input, init);
-      }
-      return Promise.resolve(json({ id: "j1", status: "running" }));
-    });
-    const geo = new Geocoder({ adapter: og({ baseUrl: "http://og.test", fetch, ...quiet }) });
-    const error = await caught(geo.batch.geocode(["a"], { signal: controller.signal }));
+    const client = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 5, ...quiet });
+    const call = client.batch.geocode([{ q: "a" }, { q: "b" }], {}, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+    const error = await caught(call);
     expect(error.code).toBe("aborted");
     expect(error.operation).toBe("batch.geocode");
-    expect(fetch.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET", "DELETE"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the reading of a job's lines", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn<Fetch>(async (_input, init) => {
+      const signal = init!.signal!;
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          stream.enqueue(new TextEncoder().encode('{"a":1}\n'));
+          signal.addEventListener("abort", () => stream.error(signal.reason), { once: true });
+        },
+      });
+      return new Response(body);
+    });
+    const client = createClient({ baseUrl: "http://og.test", fetch, ...quiet });
+    const lines: string[] = [];
+    const read = (async () => {
+      for await (const line of client.jobs.lines("j1", { signal: controller.signal })) {
+        lines.push(line);
+        controller.abort();
+      }
+    })();
+    const error = await caught(read);
+    expect(lines).toEqual(['{"a":1}']);
+    expect(error.code).toBe("aborted");
+    expect(error.operation).toBe("jobs.lines");
   });
 });
 
@@ -278,10 +268,8 @@ describe("a body cut short", () => {
       });
       return new Response(body, { headers: { "content-type": "application/json" } });
     });
-    const geo = new Geocoder({
-      adapter: og({ baseUrl: "http://og.test", fetch, maxRetries: 0, ...quiet }),
-    });
-    const error = await caught(geo.geocode("x", { timeout: 20 }));
+    const geo = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 0, ...quiet });
+    const error = await caught(geo.geocode({ q: "x" }, { timeout: 20 }));
     expect(error.code).toBe("timeout");
     expect(error.cause).toBeInstanceOf(APIConnectionTimeoutError);
   });

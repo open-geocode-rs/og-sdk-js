@@ -1,7 +1,7 @@
 {
   "name": "@open-geocode/client",
   "version": "0.0.0",
-  "description": "One geocoding API over og, Google, Mapbox, HERE and Precisely. Typed, tree-shakeable, no runtime dependencies.",
+  "description": "The client for open-geocode, and clients that speak the Google, Mapbox, HERE and Precisely APIs against og or the vendor. Typed, tree-shakeable, no runtime dependencies.",
   "keywords": [
     "autocomplete",
     "geocoder",
@@ -25,10 +25,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./og": {
-      "types": "./dist/og.d.ts",
-      "default": "./dist/og.js"
     },
     "./google": {
       "types": "./dist/google.d.ts",

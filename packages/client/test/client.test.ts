@@ -1,34 +1,34 @@
 /// <reference types="node" />
 import { describe, expect, it, vi } from "vitest";
 import {
+  ALL_EXTRAS,
   APIConnectionTimeoutError,
   APIUserAbortError,
   BadRequestError,
   createClient,
+  GeocoderError,
   InternalServerError,
   NotFoundError,
-  OgError,
-  retryDelay,
 } from "../src/index.ts";
+import { retryDelay } from "../src/core.ts";
+import { bodyOf, fakeFetch as plainFetch, type Reply } from "./helpers.ts";
 
-type Reply = { status?: number; body?: unknown; headers?: Record<string, string> };
+/** A fake fetch whose every answer carries a request ID. */
+const fakeFetch = (...replies: Reply[]) =>
+  plainFetch(
+    ...replies.map((reply, index) => ({
+      ...reply,
+      headers: { "x-request-id": `req-${index + 1}`, ...reply.headers },
+    })),
+  );
 
-/** A fake fetch that answers with each reply in turn. */
-function fakeFetch(...replies: Reply[]) {
-  let call = 0;
-  return vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
-    const reply = replies[Math.min(call++, replies.length - 1)]!;
-    const body = typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body ?? {});
-    return new Response(body, {
-      status: reply.status ?? 200,
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": `req-${call}`,
-        ...reply.headers,
-      },
-    });
-  });
-}
+const caught = async (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
+  (await Promise.resolve(promise).then(
+    () => {
+      throw new Error("the call did not fail");
+    },
+    (error: unknown) => error,
+  )) as GeocoderError;
 
 const empty = { type: "FeatureCollection", features: [], geocoding: {} };
 const problem = (status: number, code: string) => ({
@@ -65,45 +65,142 @@ describe("requests", () => {
   });
 });
 
+const feature = (properties: Record<string, unknown>) => ({
+  type: "Feature",
+  geometry: { type: "Point", coordinates: [7.42, 43.73] },
+  properties: {
+    id: "osm:node:1",
+    layer: "address",
+    accuracy: "rooftop",
+    name: "2 Avenue de Monte-Carlo",
+    label: "2 Avenue de Monte-Carlo, Monaco",
+    source: { dataset: "osm" },
+    ...properties,
+  },
+});
+const rich = {
+  ...empty,
+  features: [
+    feature({
+      timezone: "Europe/Monaco",
+      bbox: [7.4, 43.7, 7.5, 43.8],
+      contact: { phone: "+377 1" },
+      match: { street: "matched" },
+      context: { country: { id: "osm:relation:1", name: "Monaco", code: "MC" } },
+    }),
+  ],
+};
+
 describe("responses", () => {
-  it("adds og's request id to parsed objects, not enumerable", async () => {
-    const og = createClient({ baseUrl: "http://og.test", fetch: fakeFetch({ body: empty }) });
+  it("returns og's own shape", async () => {
+    const og = createClient({ baseUrl: "http://og.test", fetch: fakeFetch({ body: rich }) });
+    expect(og).toMatchObject({ shape: "og", server: "og" });
     const result = await og.geocode({ q: "x" });
-    expect(result._request_id).toBe("req-1");
-    expect(Object.keys(result)).not.toContain("_request_id");
+    expect(result.type).toBe("FeatureCollection");
+    expect(result.features[0]!.geometry.coordinates).toEqual([7.42, 43.73]);
+    expect(result.features[0]!.properties.context?.country?.code).toBe("MC");
   });
 
-  it("returns the raw response with withResponse() and asResponse()", async () => {
+  it("gives the response, the request id, the server and the cache rule with withResponse()", async () => {
     const og = createClient({
       baseUrl: "http://og.test",
       fetch: fakeFetch({ body: empty, headers: { "x-og-pack": "p1" } }),
     });
-    const { data, response, requestId } = await og.geocode({ q: "x" }).withResponse();
-    expect(data.features).toEqual([]);
-    expect(response.headers.get("x-og-pack")).toBe("p1");
-    expect(requestId).toBe("req-1");
-    const raw = await createClient({ baseUrl: "http://og.test", fetch: fakeFetch({ body: empty }) })
+    const { data, response, requestId, server, cache } = await og
       .geocode({ q: "x" })
-      .asResponse();
-    expect(raw.bodyUsed).toBe(false);
+      .withResponse();
+    expect(data.features).toEqual([]);
+    expect(response?.headers.get("x-og-pack")).toBe("p1");
+    expect(requestId).toBe("req-1");
+    expect(server).toBe("og");
+    expect(cache).toEqual({ maxTtl: Infinity });
+  });
+});
+
+describe("include", () => {
+  it("leaves the extras out unless they are asked for, and never sends include to og", async () => {
+    const fetch = fakeFetch({ body: rich });
+    const og = createClient({ baseUrl: "http://og.test", fetch });
+    const lean = await og.geocode({ q: "x" });
+    const properties = lean.features[0]!.properties as Record<string, unknown>;
+    for (const extra of ALL_EXTRAS) expect(properties).not.toHaveProperty(extra);
+    expect(properties["context"]).toBeDefined();
+    expect(String(fetch.mock.calls[0]![0])).toBe("http://og.test/geocode?q=x");
+
+    const some = await og.geocode({ q: "x", include: ["timezone", "match"] });
+    expect(some.features[0]!.properties.timezone).toBe("Europe/Monaco");
+    expect(some.features[0]!.properties.match).toEqual({ street: "matched" });
+    expect(some.features[0]!.properties).not.toHaveProperty("bbox");
+    // @ts-expect-error an extra that was not asked for is not on the type either
+    void some.features[0]!.properties.bbox;
+
+    const all = await og.places({ q: "x", include: ALL_EXTRAS });
+    expect(all.features[0]!.properties.contact).toEqual({ phone: "+377 1" });
+  });
+});
+
+describe("batch", () => {
+  it("posts the items as JSON, with the shared parameters in the query", async () => {
+    const fetch = fakeFetch({
+      body: {
+        results: [
+          { id: "a", status: 200, response: rich },
+          { id: "b", status: 400 },
+        ],
+        summary: { total: 2, succeeded: 1, failed: 1 },
+      },
+    });
+    const og = createClient({ baseUrl: "http://og.test", fetch });
+    const items = [
+      { id: "a", q: "2 Avenue de Monte-Carlo" },
+      { id: "b", q: "" },
+    ];
+    const batch = await og.batch.geocode(items, { country: "MC", include: ["bbox"] });
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("http://og.test/geocode?country=MC");
+    expect(init!.method).toBe("POST");
+    expect(init!.headers).toMatchObject({ "content-type": "application/json" });
+    expect(bodyOf(fetch)).toEqual(items);
+    expect(batch.summary.failed).toBe(1);
+    const properties = batch.results[0]!.response!.features[0]!.properties;
+    expect(properties.bbox).toEqual([7.4, 43.7, 7.5, 43.8]);
+    expect(properties).not.toHaveProperty("timezone");
+  });
+
+  it("has a reverse and a places batch", async () => {
+    const fetch = fakeFetch({
+      body: { results: [], summary: { total: 0, succeeded: 0, failed: 0 } },
+    });
+    const og = createClient({ baseUrl: "http://og.test", fetch });
+    await og.batch.reverse([{ lon: 7.42, lat: 43.73 }]);
+    await og.batch.places([{ ids: "osm:node:1" }]);
+    expect(fetch.mock.calls.map(([url, init]) => `${init!.method} ${String(url)}`)).toEqual([
+      "POST http://og.test/reverse",
+      "POST http://og.test/places",
+    ]);
   });
 });
 
 describe("errors", () => {
-  it("throws the subclass for the status, with og's code and request id", async () => {
+  it("throws one error class, with a normalised code and the transport error as the cause", async () => {
     const og = createClient({
       baseUrl: "http://og.test",
       fetch: fakeFetch({ status: 400, body: problem(400, "invalid_parameter") }),
     });
-    const error = await og.geocode({ q: "" }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(BadRequestError);
-    expect(error).toBeInstanceOf(OgError);
+    const error = await caught(og.geocode({ q: "" }));
+    expect(error).toBeInstanceOf(GeocoderError);
     expect(error).toMatchObject({
+      code: "invalid_request",
       status: 400,
-      code: "invalid_parameter",
+      provider: "og",
+      operation: "geocode",
       requestId: "req-1",
       message: "failed invalid_parameter",
     });
+    // og's own error code stays readable on the problem document and on the cause.
+    expect(error.problem?.error_code).toBe("invalid_parameter");
+    expect(error.cause).toBeInstanceOf(BadRequestError);
+    expect((error.cause as BadRequestError).code).toBe("invalid_parameter");
   });
 
   it("maps 404 and 5xx", async () => {
@@ -111,13 +208,31 @@ describe("errors", () => {
       baseUrl: "http://og.test",
       fetch: fakeFetch({ status: 404, body: problem(404, "not_found") }),
     });
-    await expect(og404.jobs.status("nope")).rejects.toBeInstanceOf(NotFoundError);
+    const missing = await caught(og404.jobs.status("nope"));
+    expect(missing.code).toBe("not_found");
+    expect(missing.cause).toBeInstanceOf(NotFoundError);
     const og503 = createClient({
       baseUrl: "http://og.test",
       maxRetries: 0,
       fetch: fakeFetch({ status: 503, body: problem(503, "not_ready") }),
     });
-    await expect(og503.geocode({ q: "x" })).rejects.toBeInstanceOf(InternalServerError);
+    const down = await caught(og503.geocode({ q: "x" }));
+    expect(down.code).toBe("unavailable");
+    expect(down.retryable).toBe(true);
+    expect(down.cause).toBeInstanceOf(InternalServerError);
+  });
+
+  it("reads an answer that is not JSON as a provider error", async () => {
+    const og = createClient({ baseUrl: "http://og.test", fetch: fakeFetch({ body: "<html>" }) });
+    const error = await caught(og.geocode({ q: "x" }));
+    expect(error.code).toBe("provider_error");
+    expect(error.requestId).toBe("req-1");
+  });
+
+  it("needs a baseUrl", () => {
+    expect(() => createClient({} as { baseUrl: string })).toThrowError(
+      expect.objectContaining({ code: "invalid_request" }),
+    );
   });
 });
 
@@ -136,8 +251,17 @@ describe("retries", () => {
   it("stops after maxRetries", async () => {
     const fetch = fakeFetch({ status: 500, headers: fast, body: problem(500, "internal") });
     const og = createClient({ baseUrl: "http://og.test", fetch, maxRetries: 1 });
-    await expect(og.geocode({ q: "x" })).rejects.toBeInstanceOf(InternalServerError);
+    expect((await caught(og.geocode({ q: "x" }))).code).toBe("provider_error");
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("never retries a 501, since the endpoint will not appear", async () => {
+    const fetch = fakeFetch({ status: 501, headers: fast });
+    const error = await caught(
+      createClient({ baseUrl: "http://og.test", fetch }).geocode({ q: "x" }),
+    );
+    expect(error.code).toBe("unsupported");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("never retries 4xx other than 408 and 429", async () => {
@@ -188,18 +312,22 @@ describe("timeouts and aborts", () => {
       ),
   );
 
-  it("throws APIConnectionTimeoutError after timeout", async () => {
+  it("fails with code timeout after the timeout", async () => {
     const og = createClient({ baseUrl: "http://og.test", fetch: hang, timeout: 20, maxRetries: 0 });
-    await expect(og.geocode({ q: "x" })).rejects.toBeInstanceOf(APIConnectionTimeoutError);
+    const error = await caught(og.geocode({ q: "x" }));
+    expect(error.code).toBe("timeout");
+    expect(error.cause).toBeInstanceOf(APIConnectionTimeoutError);
   });
 
-  it("throws APIUserAbortError when the caller aborts, without retrying", async () => {
+  it("fails with code aborted when the caller aborts, without retrying", async () => {
     hang.mockClear();
     const og = createClient({ baseUrl: "http://og.test", fetch: hang });
     const controller = new AbortController();
     const pending = og.geocode({ q: "x" }, { signal: controller.signal });
     controller.abort();
-    await expect(pending).rejects.toBeInstanceOf(APIUserAbortError);
+    const error = await caught(pending);
+    expect(error.code).toBe("aborted");
+    expect(error.cause).toBeInstanceOf(APIUserAbortError);
     expect(hang).toHaveBeenCalledTimes(1);
   });
 });
@@ -279,9 +407,40 @@ const liveClient = () => createClient({ baseUrl: process.env["OG_URL"]! });
 
 describe.runIf(process.env["OG_URL"])("against a live og", () => {
   it("geocodes an address and returns the request id", async () => {
-    const result = await liveClient().geocode({ q: liveQuery, limit: 1 });
-    expect(result.features[0]!.properties.label).toBeTruthy();
-    expect(result._request_id).toBeTruthy();
+    const { data, requestId, server } = await liveClient()
+      .geocode({ q: liveQuery, limit: 1 })
+      .withResponse();
+    expect(data.features[0]!.properties.label).toBeTruthy();
+    expect(requestId).toBeTruthy();
+    expect(server).toBe("og");
+  });
+
+  it("returns an extra only when it is included", async () => {
+    const client = liveClient();
+    const lean = await client.geocode({ q: liveQuery, limit: 1 });
+    expect(lean.features[0]!.properties).not.toHaveProperty("address_lines");
+    const full = await client.geocode({ q: liveQuery, limit: 1, include: ["address_lines"] });
+    expect(full.features[0]!.properties.address_lines?.length).toBeGreaterThan(0);
+  });
+
+  it("reverses, suggests and looks a place up by id", async () => {
+    const client = liveClient();
+    const found = await client.geocode({ q: liveQuery, limit: 1 });
+    const [lon, lat] = found.features[0]!.geometry.coordinates as [number, number];
+    const near = await client.reverse({ lon, lat });
+    expect(near.features.length).toBeGreaterThan(0);
+    const typed = await client.autocomplete({ q: liveQuery.slice(0, 8), include: ["highlights"] });
+    expect(typed.features.length).toBeGreaterThan(0);
+    const place = await client.places({ q: "casino", limit: 1 });
+    const same = await client.places({ ids: place.features[0]!.properties.id });
+    expect(same.features[0]!.properties.id).toBe(place.features[0]!.properties.id);
+  });
+
+  it("answers a batch in one request, and fails only the bad item", async () => {
+    const batch = await liveClient().batch.geocode([{ id: "good", q: liveQuery }, { id: "bad" }]);
+    expect(batch.summary).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(batch.results[0]!.response!.features.length).toBeGreaterThan(0);
+    expect(batch.results[1]!.error?.status).toBe(400);
   });
 
   it("runs a batch job end to end", async () => {
@@ -296,5 +455,11 @@ describe.runIf(process.env["OG_URL"])("against a live og", () => {
     for await (const line of client.jobs.lines(created.id)) lines.push(line);
     expect(lines.length).toBe(1);
     await client.jobs.delete(created.id);
+  });
+
+  it("fails with og's problem on a bad request", async () => {
+    const error = await caught(liveClient().reverse({ lon: 999, lat: 0 }));
+    expect(error.code).toBe("invalid_request");
+    expect(error.problem?.error_code).toBeTruthy();
   });
 });

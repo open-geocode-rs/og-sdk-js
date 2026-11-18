@@ -1,415 +1,442 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  APIConnectionError,
-  AuthenticationError,
-  Geocoder,
-  type GeocoderError,
-  InternalServerError,
-} from "../src/index.ts";
+import { type ClientInfo, createBase, type Plugin, type Position } from "../src/base.ts";
+import type { APIPromise, CacheRule, RequestOptions, Shape } from "../src/core.ts";
+import { createClient, GeocoderError, veto } from "../src/index.ts";
 import {
   cache,
   type CacheLimitEvent,
-  type CacheStore,
   compare,
-  compareResults,
   type CompareReport,
+  comparePositions,
   failover,
   memoryStore,
 } from "../src/plugins/index.ts";
-import { fakeAdapter, place } from "./helpers.ts";
+import { fakeFetch, type Fetch, type Reply, urlOf } from "./helpers.ts";
 
-const fail = () => Promise.reject(new InternalServerError("500", { status: 500 }));
+interface Found {
+  from: string;
+  points?: Position[];
+}
+interface Mini extends ClientInfo {
+  find(params: { q: string }, options?: RequestOptions): APIPromise<Found>;
+  fetch: Fetch;
+}
 
-describe("failover", () => {
-  it("falls back when the first provider is down, and says who answered", async () => {
-    const down = fakeAdapter("og", () => Promise.reject(new APIConnectionError("down")));
-    const up = fakeAdapter("google", () => ({ results: [place()] }));
-    const events: string[] = [];
-    const geo = new Geocoder({
-      adapter: down,
+/** A client of any shape with one lookup method, enough to drive a plugin. */
+function mini(
+  shape: Shape,
+  setup: {
+    baseUrl?: string;
+    cache?: CacheRule;
+    plugins?: Plugin[];
+    replies?: Reply[];
+  } = {},
+): Mini {
+  const fetch = fakeFetch(...(setup.replies ?? [{ body: { from: setup.baseUrl ?? shape } }]));
+  const base = createBase({
+    shape,
+    options: { fetch, plugins: setup.plugins, maxRetries: 0, logLevel: "off" },
+    baseUrl: setup.baseUrl,
+    credentials: true,
+    vendorUrl: `http://${shape}.test`,
+    cache: setup.cache,
+    positions: (_method, data) => (data as Found).points ?? [],
+  });
+  return {
+    shape: base.shape,
+    server: base.server,
+    fetch,
+    find: (params, options) =>
+      base.call({
+        method: "find",
+        args: [params],
+        options,
+        send: (sent) =>
+          base.http({
+            method: "GET",
+            path: "/find",
+            query: params,
+            idempotent: true,
+            options: sent,
+          }),
+      }),
+  };
+}
+
+const THIRTY_DAYS = 30 * 86_400_000;
+const caught = async (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
+  (await Promise.resolve(promise).then(
+    () => {
+      throw new Error("the call did not fail");
+    },
+    (error: unknown) => error,
+  )) as GeocoderError;
+
+describe("the pipeline", () => {
+  it("runs plugins outermost first, and gives each the call as it was made", async () => {
+    const order: string[] = [];
+    const tag = (name: string): Plugin => ({
+      name,
+      async handle(call, next) {
+        order.push(`${name} ${call.client.shape}/${call.client.server} ${call.method}`);
+        expect(call.args).toEqual([{ q: "x" }]);
+        const outcome = await next();
+        order.push(`${name} done`);
+        return outcome;
+      },
+    });
+    const client = mini("mapbox", { plugins: [tag("a"), tag("b")] });
+    await client.find({ q: "x" });
+    expect(order).toEqual(["a mapbox/mapbox find", "b mapbox/mapbox find", "b done", "a done"]);
+  });
+
+  it("lets a plugin answer without the server, or refuse the call", async () => {
+    const canned = mini("og", {
+      baseUrl: "http://og.test",
       plugins: [
-        failover({
-          to: up,
-          onFailover: ({ from, to, error }) => events.push(`${from.id}>${to.id}:${error?.code}`),
-        }),
+        {
+          name: "canned",
+          handle: async () => ({
+            data: { from: "plugin" },
+            response: undefined,
+            requestId: undefined,
+            server: "og",
+            cache: { maxTtl: 0 },
+          }),
+        },
       ],
     });
-    const result = await geo.geocode("x", { limit: 1 });
-    expect(result.provider).toBe("google");
-    expect(result.results).toHaveLength(1);
-    expect(up.native.calls[0]!.request).toEqual({ query: "x", limit: 1, include: [] });
-    expect(events).toEqual(["og>google:connection"]);
-  });
+    const outcome = await canned.find({ q: "x" }).withResponse();
+    expect(outcome.data).toEqual({ from: "plugin" });
+    expect(outcome.response).toBeUndefined();
+    expect(canned.fetch).not.toHaveBeenCalled();
 
-  it("walks a list of fallbacks in order", async () => {
-    const geo = new Geocoder({
-      adapter: fakeAdapter("a", fail),
-      plugins: [failover({ to: [fakeAdapter("b", fail), fakeAdapter("c", () => ({}))] })],
-    });
-    expect((await geo.reverse({ lat: 1, lon: 2 })).provider).toBe("c");
-  });
-
-  it("does not fall back on an error the next provider would repeat", async () => {
-    const other = fakeAdapter("b", () => ({}));
-    const geo = new Geocoder({
-      adapter: fakeAdapter("a", () =>
-        Promise.reject(new AuthenticationError("bad key", { status: 401 })),
-      ),
-      plugins: [failover({ to: other })],
-    });
-    const error = (await geo.geocode("x").catch((thrown: unknown) => thrown)) as GeocoderError;
-    expect(error.code).toBe("unauthenticated");
-    expect(other.native.calls).toHaveLength(0);
-  });
-
-  it("throws the last error when every provider fails", async () => {
-    const geo = new Geocoder({
-      adapter: fakeAdapter("a", () => Promise.reject(new APIConnectionError("a down"))),
+    const refused = mini("og", {
+      baseUrl: "http://og.test",
       plugins: [
-        failover({ to: fakeAdapter("b", () => Promise.reject(new APIConnectionError("b down"))) }),
+        {
+          name: "guard",
+          handle(call) {
+            throw veto("not today", call.method);
+          },
+        },
       ],
     });
-    const error = (await geo.geocode("x").catch((thrown: unknown) => thrown)) as GeocoderError;
-    expect(error.message).toBe("b down");
-    expect(error.provider).toBe("b");
+    const error = await caught(refused.find({ q: "x" }));
+    expect(error).toMatchObject({ code: "vetoed", operation: "find", message: "not today" });
+    expect(refused.fetch).not.toHaveBeenCalled();
   });
 
-  it("falls back on an empty answer when asked, and on a missing operation", async () => {
-    const empty = fakeAdapter("a", () => ({ results: [] }));
-    const full = fakeAdapter("b", () => ({ results: [place()] }));
-    const onEmpty = new Geocoder({
-      adapter: empty,
-      plugins: [failover({ to: full, onEmpty: true })],
+  it("works on the og client", async () => {
+    const seen: string[] = [];
+    const fetch = fakeFetch({ body: { type: "FeatureCollection", features: [] } });
+    const og = createClient({
+      baseUrl: "http://og.test",
+      fetch,
+      plugins: [
+        {
+          name: "log",
+          handle(call, next) {
+            seen.push(call.method);
+            return next();
+          },
+        },
+      ],
     });
-    expect((await onEmpty.geocode("x")).provider).toBe("b");
-    const plain = new Geocoder({ adapter: empty, plugins: [failover({ to: full })] });
-    expect((await plain.geocode("x")).provider).toBe("a");
+    await og.geocode({ q: "x" });
+    await og.batch.reverse([{ lon: 1, lat: 2 }]);
+    await og.jobs.status("j1");
+    // A job's own calls never pass through the plugins.
+    expect(seen).toEqual(["geocode", "batch.reverse"]);
+  });
+});
 
-    const noPlaces = fakeAdapter("a", () => ({}));
-    delete noPlaces.places;
-    delete noPlaces.capabilities.places;
-    const geo = new Geocoder({ adapter: noPlaces, plugins: [failover({ to: full })] });
-    expect((await geo.places("x")).provider).toBe("b");
+describe("which server answers", () => {
+  it("is og under /compat/<shape> with a baseUrl, and the vendor without", async () => {
+    const viaOg = mini("here", { baseUrl: "http://og.test/" });
+    await viaOg.find({ q: "x" });
+    expect(viaOg.server).toBe("og");
+    expect(urlOf(viaOg.fetch).href).toBe("http://og.test/compat/here/find?q=x");
+
+    const direct = mini("here");
+    await direct.find({ q: "x" });
+    expect(direct.server).toBe("here");
+    expect(urlOf(direct.fetch).href).toBe("http://here.test/find?q=x");
+  });
+
+  it("names og as the provider of an error from /compat", async () => {
+    const client = mini("google", {
+      baseUrl: "http://og.test",
+      replies: [{ status: 501, body: { error: { message: "no" } } }],
+    });
+    const error = await caught(client.find({ q: "x" }));
+    expect(error).toMatchObject({ code: "unsupported", provider: "og", status: 501 });
   });
 });
 
 describe("cache", () => {
-  it("answers a repeated call from memory, with no response", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+  it("answers a repeated call from memory, with a copy for each caller", async () => {
     const lookups: boolean[] = [];
-    const geo = new Geocoder({
-      adapter,
-      plugins: [cache({ onLookup: ({ hit }) => lookups.push(hit) })],
+    const client = mini("og", {
+      baseUrl: "http://og.test",
+      plugins: [cache({ onLookup: (event) => lookups.push(event.hit) })],
     });
-    const first = await geo.geocode("x", { limit: 1 }).withResponse();
-    const second = await geo.geocode("x", { limit: 1 }).withResponse();
-    expect(adapter.native.calls).toHaveLength(1);
-    expect(second.data).toEqual(first.data);
-    expect(first.response).toBeInstanceOf(Response);
+    const first = await client.find({ q: "x" }).withResponse();
+    first.data.from = "changed";
+    const second = await client.find({ q: "x" }).withResponse();
+    await client.find({ q: "y" });
+    expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(lookups).toEqual([false, true, false]);
+    expect(second.data).toEqual({ from: "http://og.test" });
     expect(second.response).toBeUndefined();
-    expect(lookups).toEqual([false, true]);
+    expect(second.server).toBe("og");
   });
 
-  it("keys on provider, operation and request, but not on the session", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-    adapter.capabilities.autocomplete!.options = ["limit", "session"];
-    const geo = new Geocoder({ adapter, plugins: [cache()] });
-    await geo.autocomplete("x", { session: "s1" });
-    await geo.autocomplete("x", { session: "s2" });
-    await geo.autocomplete("x", { limit: 2 });
-    await geo.places("x");
-    expect(adapter.native.calls).toHaveLength(3);
-  });
-
-  it("hands out copies, so changing a result does not change the cache", async () => {
-    const geo = new Geocoder({
-      adapter: fakeAdapter("a", () => ({ results: [place()] })),
-      plugins: [cache()],
-    });
-    (await geo.geocode("x")).results[0]!.name = "changed";
-    (await geo.geocode("x")).results[0]!.name = "changed again";
-    expect((await geo.geocode("x")).results[0]!.name).toBe("10 King St W");
-  });
-
-  it("expires entries, drops the least recently used, and does not cache errors", async () => {
-    vi.useFakeTimers();
-    try {
-      const store = memoryStore(2);
-      const value = { provider: "a", operation: "geocode" } as never;
-      store.set("one", value, 1000);
-      store.set("two", value, 1000);
-      expect(store.get("one")).toBe(value);
-      store.set("three", value, 1000);
-      expect(store.get("two")).toBeUndefined();
-      expect(store.get("one")).toBe(value);
-      vi.advanceTimersByTime(1001);
-      expect(store.get("one")).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
-    let calls = 0;
-    const flaky = fakeAdapter("a", () =>
-      calls++ === 0 ? Promise.reject(new APIConnectionError("down")) : ({ results: [] } as never),
-    );
-    const geo = new Geocoder({ adapter: flaky, plugins: [cache()] });
-    await geo.geocode("x").catch(() => {});
-    await geo.geocode("x");
-    expect(calls).toBe(2);
-  });
-
-  it("caches only the operations listed", async () => {
-    const adapter = fakeAdapter("a", () => ({}));
-    const geo = new Geocoder({ adapter, plugins: [cache({ operations: ["geocode"] })] });
-    await geo.geocode("x");
-    await geo.geocode("x");
-    await geo.autocomplete("x");
-    await geo.autocomplete("x");
-    expect(adapter.native.calls.map((call) => call.operation)).toEqual([
-      "geocode",
-      "autocomplete",
-      "autocomplete",
-    ]);
-  });
-});
-
-/** A store that records how long each answer was kept for. */
-const recorder = () => {
-  const kept: number[] = [];
-  const inner = memoryStore();
-  const store: CacheStore = {
-    get: (key) => inner.get(key),
-    set: (key, value, ttl) => {
-      kept.push(ttl);
-      return inner.set(key, value, ttl);
-    },
-  };
-  return { store, kept };
-};
-
-describe("cache, under a provider's rule", () => {
-  const DAY = 86_400_000;
-  it("keeps nothing where the provider allows none, and says so", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-    adapter.capabilities.cache = { maxTtl: 0 };
-    const { store, kept } = recorder();
+  it("keeps nothing where the vendor's rule is never, and says so", async () => {
     const events: CacheLimitEvent[] = [];
-    const geo = new Geocoder({
-      adapter,
-      plugins: [cache({ store, ttl: DAY, onLimit: (event) => events.push(event) })],
-    });
-    await geo.geocode("x");
-    const second = await geo.geocode("x").withResponse();
-    expect(adapter.native.calls).toHaveLength(2);
-    expect(second.response).toBeInstanceOf(Response);
-    expect(kept).toEqual([]);
-    expect(events).toEqual([
-      { provider: "a", operation: "geocode", action: "skipped", asked: DAY, allowed: 0 },
-      { provider: "a", operation: "geocode", action: "skipped", asked: DAY, allowed: 0 },
-    ]);
-  });
-
-  it("treats an adapter that states no rule as one that allows none", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-    delete adapter.capabilities.cache;
-    const events: CacheLimitEvent[] = [];
-    const geo = new Geocoder({
-      adapter,
+    const client = mini("mapbox", {
+      cache: { maxTtl: 0 },
       plugins: [cache({ onLimit: (event) => events.push(event) })],
     });
-    await geo.geocode("x");
-    await geo.geocode("x");
-    expect(adapter.native.calls).toHaveLength(2);
-    expect(events.map((event) => event.action)).toEqual(["skipped", "skipped"]);
-    expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
+    await client.find({ q: "x" });
+    await client.find({ q: "x" });
+    expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(events).toEqual([
+      { server: "mapbox", method: "find", action: "skipped", asked: 300_000, allowed: 0 },
+      { server: "mapbox", method: "find", action: "skipped", asked: 300_000, allowed: 0 },
+    ]);
   });
 
-  it("keeps an answer no longer than the provider allows, and says so", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-    adapter.capabilities.cache = { maxTtl: 30 * DAY };
-    const { store, kept } = recorder();
+  it("keeps an answer no longer than the vendor allows", async () => {
     const events: CacheLimitEvent[] = [];
-    const geo = new Geocoder({
-      adapter,
-      plugins: [cache({ store, ttl: 90 * DAY, onLimit: (event) => events.push(event) })],
+    const store = memoryStore();
+    const set = vi.spyOn(store, "set");
+    const client = mini("google", {
+      cache: { maxTtl: THIRTY_DAYS },
+      plugins: [cache({ ttl: 90 * 86_400_000, store, onLimit: (event) => events.push(event) })],
     });
-    await geo.geocode("x");
-    await geo.geocode("x");
-    expect(adapter.native.calls).toHaveLength(1);
-    expect(kept).toEqual([30 * DAY]);
+    await client.find({ q: "x" });
+    expect(set.mock.calls[0]![2]).toBe(THIRTY_DAYS);
     expect(events).toEqual([
       {
-        provider: "a",
-        operation: "geocode",
+        server: "google",
+        method: "find",
         action: "shortened",
-        asked: 90 * DAY,
-        allowed: 30 * DAY,
+        asked: 90 * 86_400_000,
+        allowed: THIRTY_DAYS,
       },
     ]);
-
-    // A ttl inside the rule is used as asked, with nothing to report.
-    const short = recorder();
-    const quiet: CacheLimitEvent[] = [];
-    const within = new Geocoder({
-      adapter,
-      plugins: [cache({ store: short.store, ttl: DAY, onLimit: (event) => quiet.push(event) })],
-    });
-    await within.geocode("y");
-    expect(short.kept).toEqual([DAY]);
-    expect(quiet).toEqual([]);
+    await client.find({ q: "x" });
+    expect(client.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("follows the rule of the operation where it has one of its own", async () => {
-    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-    adapter.capabilities.cache = { maxTtl: 0 };
-    adapter.capabilities.geocode = {
-      ...adapter.capabilities.geocode!,
-      cache: { maxTtl: Infinity },
-    };
-    const { store, kept } = recorder();
+  it("sets no limit on an answer from og, whichever API it was asked through", async () => {
+    const store = memoryStore();
+    const set = vi.spyOn(store, "set");
+    const onLimit = vi.fn();
+    const client = mini("mapbox", {
+      baseUrl: "http://og.test",
+      cache: { maxTtl: 0 },
+      plugins: [cache({ ttl: Infinity, store, onLimit })],
+    });
+    const outcome = await client.find({ q: "x" }).withResponse();
+    expect(outcome.cache).toEqual({ maxTtl: Infinity });
+    expect(set.mock.calls[0]![2]).toBe(Infinity);
+    expect(onLimit).not.toHaveBeenCalled();
+  });
+
+  it("follows the rule of the server that answered after a failover", async () => {
     const events: CacheLimitEvent[] = [];
-    const geo = new Geocoder({
-      adapter,
-      plugins: [cache({ store, ttl: DAY, onLimit: (event) => events.push(event) })],
+    const og = mini("mapbox", { baseUrl: "http://og.test" });
+    const client = mini("mapbox", {
+      cache: { maxTtl: 0 },
+      replies: [{ status: 503 }],
+      plugins: [cache({ onLimit: (event) => events.push(event) }), failover({ to: og })],
     });
-    await geo.geocode("x");
-    await geo.geocode("x");
-    await geo.places("x");
-    await geo.places("x");
-    expect(adapter.native.calls.map((call) => call.operation)).toEqual([
-      "geocode",
-      "places",
-      "places",
-    ]);
-    expect(kept).toEqual([DAY]);
-    expect(events.map((event) => `${event.operation} ${event.action}`)).toEqual([
-      "places skipped",
-      "places skipped",
-    ]);
+    const first = await client.find({ q: "x" }).withResponse();
+    const second = await client.find({ q: "x" }).withResponse();
+    expect(first.server).toBe("og");
+    expect(second.server).toBe("og");
+    expect(second.response).toBeUndefined();
+    expect(events).toEqual([]);
+    expect(client.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("does not keep an answer another provider gave in place of the one asked", async () => {
-    const down = fakeAdapter("a", () => Promise.reject(new APIConnectionError("down")));
-    const other = fakeAdapter("b", () => ({ results: [place()] }));
-    const { store, kept } = recorder();
-    const events: CacheLimitEvent[] = [];
-    const geo = new Geocoder({
-      adapter: down,
-      plugins: [
-        cache({ store, ttl: DAY, onLimit: (event) => events.push(event) }),
-        failover({ to: other }),
-      ],
-    });
-    expect((await geo.geocode("x")).provider).toBe("b");
-    expect(kept).toEqual([]);
-    expect(events).toEqual([
-      { provider: "b", operation: "geocode", action: "foreign", asked: DAY, allowed: Infinity },
-    ]);
-  });
-
-  it("warns on the console once per case when no reporter is given", async () => {
+  it("warns once on the console when nobody listens", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const adapter = fakeAdapter("a", () => ({ results: [place()] }));
-      adapter.capabilities.cache = { maxTtl: 0 };
-      const geo = new Geocoder({ adapter, plugins: [cache({ ttl: DAY })] });
-      await geo.geocode("x");
-      await geo.geocode("y");
-      await geo.places("x");
-      expect(warn.mock.calls.map(([message]) => message)).toEqual([
-        "[cache] a allows a geocode answer to be kept not at all, so it is not kept for the 1 days asked for.",
-        "[cache] a allows a places answer to be kept not at all, so it is not kept for the 1 days asked for.",
-      ]);
+      const client = mini("here", { cache: { maxTtl: 0 }, plugins: [cache()] });
+      await client.find({ q: "x" });
+      await client.find({ q: "y" });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toBe(
+        "[cache] here does not allow a find answer to be kept, so it is not cached.",
+      );
+      const short = mini("google", {
+        cache: { maxTtl: THIRTY_DAYS },
+        plugins: [cache({ ttl: Infinity })],
+      });
+      await short.find({ q: "x" });
+      expect(warn.mock.calls[1]![0]).toBe(
+        "[cache] google allows a find answer to be kept for 30 days, so it is not kept for the ever asked for.",
+      );
     } finally {
       warn.mockRestore();
     }
   });
+
+  it("caches only the methods named, and only the calls with a key", async () => {
+    const named = mini("og", {
+      baseUrl: "http://og.test",
+      plugins: [cache({ methods: ["other"] })],
+    });
+    await named.find({ q: "x" });
+    await named.find({ q: "x" });
+    expect(named.fetch).toHaveBeenCalledTimes(2);
+    const keyed = mini("og", {
+      baseUrl: "http://og.test",
+      plugins: [cache({ key: () => undefined })],
+    });
+    await keyed.find({ q: "x" });
+    await keyed.find({ q: "x" });
+    expect(keyed.fetch).toHaveBeenCalledTimes(2);
+  });
 });
 
+describe("failover", () => {
+  it("moves to the next client of the same API when the first fails", async () => {
+    const moves: string[] = [];
+    const og = mini("google", { baseUrl: "http://og.test" });
+    const client = mini("google", {
+      replies: [{ status: 503 }],
+      plugins: [
+        failover({
+          to: og,
+          onFailover: (event) =>
+            moves.push(`${event.from.server} to ${event.to.server} ${event.error?.code}`),
+        }),
+      ],
+    });
+    const outcome = await client.find({ q: "x" }).withResponse();
+    expect(outcome.data).toEqual({ from: "http://og.test" });
+    expect(outcome.server).toBe("og");
+    expect(urlOf(og.fetch).href).toBe("http://og.test/compat/google/find?q=x");
+    expect(moves).toEqual(["google to og unavailable"]);
+  });
+
+  it("stays put on a bad request and on an abort", async () => {
+    const og = mini("google", { baseUrl: "http://og.test" });
+    const client = mini("google", {
+      replies: [{ status: 400 }],
+      plugins: [failover({ to: og })],
+    });
+    expect((await caught(client.find({ q: "" }))).code).toBe("invalid_request");
+    const error = await caught(client.find({ q: "x" }, { signal: AbortSignal.abort() }));
+    expect(error.code).toBe("aborted");
+    expect(og.fetch).not.toHaveBeenCalled();
+  });
+
+  it("moves on for an answer the caller calls empty, and throws the last error", async () => {
+    const second = mini("og", { baseUrl: "http://two.test", replies: [{ status: 500 }] });
+    const client = mini("og", {
+      baseUrl: "http://one.test",
+      plugins: [failover({ to: [second], empty: (data) => (data as Found).from !== "never" })],
+    });
+    const error = await caught(client.find({ q: "x" }));
+    expect(error.code).toBe("provider_error");
+    expect(second.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a fallback that speaks another API", () => {
+    const og = createClient({ baseUrl: "http://og.test" });
+    expect(() => mini("mapbox", { plugins: [failover({ to: og })] })).toThrowError(
+      expect.objectContaining({
+        code: "invalid_request",
+        message: "failover needs two clients that speak the same API, and was given mapbox and og.",
+      }),
+    );
+  });
+});
+
+const at = (lat: number, lon: number): Reply => ({
+  body: { from: "x", points: [{ lat, lon }] },
+});
+const onReport = (): void => {};
+
 describe("compare", () => {
-  const here = place({ location: { lat: 43.6489, lon: -79.3789 } });
-  const near = place({
-    id: "other",
-    location: { lat: 43.649, lon: -79.3789 },
-    address: { ...here.address, locality: "TORONTO", postcode: "M5H 1A1" },
-  });
-  const far = place({ type: "street", location: { lat: 43.7, lon: -79.4 } });
-
-  it("diffs two answers", () => {
-    const same = compareResults([here], [near]);
-    expect(same.agree).toBe(true);
-    expect(same.topDistance).toBeGreaterThan(10);
-    expect(same.topDistance).toBeLessThan(12);
-    // Case differs but the text is the same, so only the postcode is reported.
-    expect(same.address).toEqual({ postcode: { primary: null, candidate: "M5H 1A1" } });
-    expect(same.missing).toEqual([]);
-    const differ = compareResults([here, near], [far]);
-    expect(differ.agree).toBe(false);
-    expect(differ.type).toEqual({ primary: "address", candidate: "street" });
-    expect(differ.counts).toEqual({ primary: 2, candidate: 1 });
-    expect(differ.missing).toEqual([0, 1]);
-    expect(compareResults([], [far]).topDistance).toBeNull();
-  });
-
-  it("runs the candidate on the same request and reports, without changing the answer", async () => {
-    const primary = fakeAdapter("google", () => ({ results: [here] }));
-    const candidate = fakeAdapter("og", () => ({ results: [near] }));
+  it("reports how the two answers differ, and answers with the primary's", async () => {
     const reports: CompareReport[] = [];
-    const geo = new Geocoder({
-      adapter: primary,
+    const candidate = mini("mapbox", { baseUrl: "http://og.test", replies: [at(43.7396, 7.4276)] });
+    const client = mini("mapbox", {
+      replies: [at(43.7377, 7.4271)],
       plugins: [
         compare({ with: candidate, onReport: (report) => reports.push(report), wait: true }),
       ],
     });
-    const result = await geo.geocode("10 King St W", { limit: 1 });
-    expect(result.provider).toBe("google");
-    expect(candidate.native.calls[0]!.request).toEqual(primary.native.calls[0]!.request);
+    const outcome = await client.find({ q: "casino" }).withResponse();
+    expect(outcome.server).toBe("mapbox");
     expect(reports).toHaveLength(1);
-    expect(reports[0]!.primary.provider).toBe("google");
-    expect(reports[0]!.candidate.provider).toBe("og");
-    expect(reports[0]!.candidate.ms).toBeGreaterThanOrEqual(0);
-    expect(reports[0]!.comparison?.agree).toBe(true);
+    const report = reports[0]!;
+    expect(report).toMatchObject({ method: "find", args: [{ q: "casino" }] });
+    expect(report.primary).toMatchObject({ server: "mapbox", error: undefined });
+    expect(report.candidate).toMatchObject({ server: "og", error: undefined });
+    expect(report.candidate.data).toEqual({ from: "x", points: [{ lat: 43.7396, lon: 7.4276 }] });
+    expect(report.comparison).toMatchObject({
+      agree: false,
+      counts: { primary: 1, candidate: 1 },
+      missing: [0],
+    });
+    expect(report.comparison!.topDistance).toBeGreaterThan(200);
+    expect(report.comparison!.topDistance).toBeLessThan(230);
   });
 
-  it("never lets the candidate fail or slow the call", async () => {
-    const gate: { open: () => void } = { open: () => {} };
-    const slow = new Promise<void>((resolve) => (gate.open = resolve));
-    const candidate = fakeAdapter("og", async () => {
-      await slow;
-      throw new APIConnectionError("og down");
-    });
+  it("never fails the call when the candidate fails", async () => {
     const reports: CompareReport[] = [];
-    const geo = new Geocoder({
-      adapter: fakeAdapter("google", () => ({ results: [here] })),
-      plugins: [compare({ with: candidate, onReport: (report) => reports.push(report) })],
+    const candidate = mini("og", { baseUrl: "http://two.test", replies: [{ status: 500 }] });
+    const client = mini("og", {
+      baseUrl: "http://one.test",
+      plugins: [
+        compare({ with: candidate, onReport: (report) => reports.push(report), wait: true }),
+      ],
     });
-    expect((await geo.geocode("x")).results).toHaveLength(1);
-    expect(reports).toHaveLength(0);
-    gate.open();
-    await vi.waitFor(() => expect(reports).toHaveLength(1));
-    expect(reports[0]!.candidate.error?.code).toBe("connection");
+    await expect(client.find({ q: "x" })).resolves.toEqual({ from: "http://one.test" });
+    expect(reports[0]!.candidate.error?.code).toBe("provider_error");
     expect(reports[0]!.comparison).toBeUndefined();
   });
 
-  it("still throws the primary's error, and skips operations and samples left out", async () => {
-    const candidate = fakeAdapter("og", () => ({}));
-    const onReport = vi.fn();
-    const failing = new Geocoder({
-      adapter: fakeAdapter("google", () => Promise.reject(new APIConnectionError("down"))),
-      plugins: [compare({ with: candidate, onReport, wait: true })],
+  it("has nothing to agree on when an answer has no point", () => {
+    expect(comparePositions([], [{ lat: 1, lon: 1 }])).toEqual({
+      agree: null,
+      counts: { primary: 0, candidate: 1 },
+      topDistance: null,
+      missing: [],
     });
-    await expect(failing.geocode("x")).rejects.toMatchObject({ code: "connection" });
-    expect(onReport).toHaveBeenCalledTimes(1);
+    expect(comparePositions([{ lat: 1, lon: 1 }], [{ lat: 1, lon: 1.0001 }]).agree).toBe(true);
+  });
 
-    const quiet = new Geocoder({
-      adapter: fakeAdapter("google", () => ({})),
-      plugins: [compare({ with: candidate, onReport, sample: 0 })],
+  it("is refused when either side is answered by HERE", () => {
+    const refusal = expect.objectContaining({
+      code: "unsupported",
+      message: "compare never runs against HERE's own service.",
     });
-    await quiet.geocode("x");
-    const typing = new Geocoder({
-      adapter: fakeAdapter("google", () => ({})),
-      plugins: [compare({ with: candidate, onReport, wait: true })],
-    });
-    await typing.autocomplete("x");
-    expect(onReport).toHaveBeenCalledTimes(1);
+    const viaOg = mini("here", { baseUrl: "http://og.test" });
+    const direct = mini("here");
+    expect(() => mini("here", { plugins: [compare({ with: viaOg, onReport })] })).toThrowError(
+      refusal,
+    );
+    expect(() =>
+      mini("here", { baseUrl: "http://og.test", plugins: [compare({ with: direct, onReport })] }),
+    ).toThrowError(refusal);
+    // Two og servers may be compared through HERE's API, since HERE answers neither.
+    expect(() =>
+      mini("here", { baseUrl: "http://two.test", plugins: [compare({ with: viaOg, onReport })] }),
+    ).not.toThrow();
+  });
+
+  it("refuses a candidate that speaks another API", () => {
+    const og = createClient({ baseUrl: "http://og.test" });
+    expect(() =>
+      mini("google", { plugins: [compare({ with: og, onReport: () => {} })] }),
+    ).toThrowError(expect.objectContaining({ code: "invalid_request" }));
   });
 });

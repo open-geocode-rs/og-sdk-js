@@ -1,5 +1,5 @@
 /**
- * Plugins for a `Geocoder`.
+ * Plugins for any client.
  *
  * ```ts
  * import { cache, compare, failover } from "@open-geocode/client/plugins";
@@ -9,13 +9,15 @@ export {
   cache,
   cacheKey,
   memoryStore,
+  type CacheEntry,
   type CacheLimitEvent,
   type CacheOptions,
   type CacheStore,
 } from "./cache.ts";
 export {
   compare,
-  compareResults,
+  comparePositions,
+  distance,
   type CompareOptions,
   type CompareReport,
   type CompareSide,

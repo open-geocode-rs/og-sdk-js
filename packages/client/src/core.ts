@@ -28,12 +28,34 @@ export interface RequestOptions {
   headers?: Record<string, string> | undefined;
 }
 
-/** A parsed response together with the raw `Response`. */
-export interface WithResponse<T, R extends Response | undefined = Response> {
-  data: T;
-  response: R;
-  requestId: string | undefined;
+/** The API a client speaks. Its methods, requests and responses are that API's own. */
+export type Shape = "og" | "google" | "mapbox" | "here" | "precisely";
+
+/**
+ * How long an answer may be kept.
+ * A cache never keeps an answer longer than the server that gave it allows.
+ */
+export interface CacheRule {
+  /** Milliseconds the answer may be kept. `0` means never, and `Infinity` means there is no limit. */
+  maxTtl: number;
 }
+
+/** What a call gives back besides its data. */
+export interface Outcome<T = unknown> {
+  /** The parsed body, in the shape of the API the client speaks. */
+  data: T;
+  /** The raw `Response`, its body already read. Absent when a plugin answered without a request. */
+  response: Response | undefined;
+  /** The ID the server logged the request under. */
+  requestId: string | undefined;
+  /** The server that answered. It is `og` for any client that points at an og server. */
+  server: Shape;
+  /** How long this answer may be kept. */
+  cache: CacheRule;
+}
+
+/** The same as {@link Outcome}, under the name `withResponse()` is known by. */
+export type WithResponse<T> = Outcome<T>;
 
 const LEVELS: Record<LogLevel, number> = { off: 0, error: 1, warn: 2, info: 3, debug: 4 };
 
@@ -63,6 +85,8 @@ export interface Call {
   query?: Record<string, unknown> | URLSearchParams;
   body?: BodyInit;
   headers?: Record<string, string>;
+  /** `true` to send none of the client's own headers, for a URL that carries its own credential. */
+  bare?: boolean | undefined;
   /** Whether a retry can repeat the call safely. Job creation cannot. */
   idempotent: boolean;
   options: RequestOptions | undefined;
@@ -245,9 +269,9 @@ export class Transport {
           method: call.method,
           headers: {
             accept: "application/json",
-            ...this.#options.headers,
+            ...(call.bare ? {} : this.#options.headers),
             ...call.headers,
-            ...options?.headers,
+            ...(call.bare ? {} : options?.headers),
           },
           ...(call.body === undefined ? {} : { body: call.body }),
           ...(watched.signal === undefined ? {} : { signal: watched.signal }),
@@ -269,7 +293,9 @@ export class Transport {
       }
       watches.set(response, watched);
       if (response.ok) return response;
-      const retryable = RETRY_STATUSES.has(response.status) || response.status >= 500;
+      // A 501 says the server lacks the endpoint, which no second attempt changes.
+      const retryable =
+        RETRY_STATUSES.has(response.status) || (response.status >= 500 && response.status !== 501);
       if (retryable && attempt < maxRetries) {
         const wait = retryDelay(attempt, response.headers);
         this.log(
@@ -306,51 +332,27 @@ export class Transport {
 }
 
 /**
- * The promise every client method returns. Await it for the parsed data, or call
- * `withResponse()` for the data with the raw `Response`, or `asResponse()` for the
- * raw `Response` with its body unread.
+ * The promise every client method returns.
+ * Await it for the parsed data, or call `withResponse()` for the data with the raw `Response`,
+ * the request ID, the server that answered and how long the answer may be kept.
  */
-export class APIPromise<T, R extends Response | undefined = Response> extends Promise<T> {
-  readonly #response: Promise<R>;
-  readonly #parse: (response: R) => Promise<T>;
-  readonly #requestId: (response: R) => string | undefined;
-  #parsed: Promise<WithResponse<T, R>> | undefined;
+export class APIPromise<T> extends Promise<T> {
+  readonly #outcome: Promise<Outcome<T>>;
 
-  constructor(
-    response: Promise<R>,
-    parse: (response: R) => Promise<T>,
-    requestId: (response: R) => string | undefined = (answer) =>
-      answer?.headers.get("x-request-id") ?? undefined,
-  ) {
+  constructor(outcome: Promise<Outcome<T>>) {
     super((resolve) => resolve(undefined as T));
-    this.#response = response;
-    this.#parse = parse;
-    this.#requestId = requestId;
-    // Rejections surface through then(), withResponse() or asResponse(), never as unhandled.
-    response.catch(() => {});
+    this.#outcome = outcome;
+    // Rejections surface through then() or withResponse(), never as unhandled.
+    outcome.catch(() => {});
   }
 
   static override get [Symbol.species](): PromiseConstructor {
     return Promise;
   }
 
-  /** The raw `Response`. Its body is unread on the og client, and already read on a `Geocoder` call. */
-  asResponse(): Promise<R> {
-    return this.#response;
-  }
-
-  /** The parsed data, the raw `Response` and the provider's request ID. */
-  withResponse(): Promise<WithResponse<T, R>> {
-    this.#parsed ??= this.#response.then(async (response) => ({
-      // A body the request's signals cut short fails as a timeout or an abort.
-      data:
-        response === undefined
-          ? await this.#parse(response)
-          : await readBody(response, this.#parse as (answer: Response) => Promise<T>),
-      response,
-      requestId: this.#requestId(response),
-    }));
-    return this.#parsed;
+  /** The parsed data with the raw `Response`, whose body is already read. */
+  withResponse(): Promise<Outcome<T>> {
+    return this.#outcome;
   }
 
   // APIPromise is a Promise, so it must define then().
@@ -359,9 +361,7 @@ export class APIPromise<T, R extends Response | undefined = Response> extends Pr
     onfulfilled?: ((value: T) => A | PromiseLike<A>) | null,
     onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
   ): Promise<A | B> {
-    return this.withResponse()
-      .then((result) => result.data)
-      .then(onfulfilled, onrejected);
+    return this.#outcome.then((outcome) => outcome.data).then(onfulfilled, onrejected);
   }
 
   override catch<B = never>(
@@ -373,15 +373,4 @@ export class APIPromise<T, R extends Response | undefined = Response> extends Pr
   override finally(onfinally?: (() => void) | null): Promise<T> {
     return this.then().finally(onfinally);
   }
-}
-
-/** Adds og's request ID to a parsed object as `_request_id`, not enumerable. */
-export function withRequestId<T>(data: T, response: Response): T {
-  if (data !== null && typeof data === "object") {
-    Object.defineProperty(data, "_request_id", {
-      value: response.headers.get("x-request-id") ?? undefined,
-      enumerable: false,
-    });
-  }
-  return data;
 }
