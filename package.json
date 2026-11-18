@@ -131,7 +131,7 @@
     {
       "name": "@open-geocode/autocomplete (CDN file)",
       "path": "packages/autocomplete/dist/og-autocomplete.iife.js",
-      "limit": "9 kB"
+      "limit": "9.5 kB"
     }
   ]
 }

@@ -57,22 +57,27 @@ await geo.batch.reverse([{ lat: 43.6489, lon: -79.3789 }]);
 
 The search options are the same for every provider.
 
-| Option       | Meaning                                                                                      |
-| ------------ | -------------------------------------------------------------------------------------------- |
-| `limit`      | The most results to return.                                                                  |
-| `language`   | One BCP 47 code, or a list. The first names the results, the rest come back as translations. |
-| `countries`  | Return only results in these countries, as ISO 3166-1 alpha-2 codes.                         |
-| `focus`      | Prefer results near this `{ lat, lon }`.                                                     |
-| `bounds`     | Return only results inside this `[west, south, east, north]` box.                            |
-| `types`      | Return only results of these types.                                                          |
-| `include`    | The opt-in fields to return.                                                                 |
-| `session`    | Groups the keystrokes of one search and the lookup that ends it, for providers that bill so. |
-| `signal`     | Cancels the request.                                                                         |
-| `timeout`    | Milliseconds before the request fails.                                                       |
-| `maxRetries` | Times a failed request is retried.                                                           |
+| Option       | Meaning                                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `limit`      | The most results to return.                                                                                |
+| `language`   | One BCP 47 code, or a list of at most 20. The first names the results, the rest come back as translations. |
+| `countries`  | Return only results in these countries, as ISO 3166-1 alpha-2 codes.                                       |
+| `focus`      | Prefer results near this `{ lat, lon }`.                                                                   |
+| `bounds`     | Return only results inside this `[west, south, east, north]` box.                                          |
+| `types`      | Return only results of these types.                                                                        |
+| `include`    | The opt-in fields to return.                                                                               |
+| `session`    | Groups the keystrokes of one search and the lookup that ends it, for providers that bill so.               |
+| `signal`     | Cancels the request.                                                                                       |
+| `timeout`    | Milliseconds before the request fails.                                                                     |
+| `maxRetries` | Times a failed request is retried.                                                                         |
 
 When a provider cannot honour an option, the option is left out and the result names it in `ignored`.
 Pass `strict: true` to the `Geocoder` to fail with `unsupported` instead.
+
+A `language` list longer than 20 codes fails with `invalid_request` before any provider is asked.
+Every further language adds a name to each result and to each area around it, so the cap keeps the size of an answer bounded.
+`translations` holds the result's own name in each further language, and never in the first.
+A result whose name is put together from parts, such as an address, has none.
 
 ## Response format
 
@@ -199,7 +204,7 @@ Anywhere else it is measured here, from the reverse point or from `focus` to the
 | `accessPoints`   | g r p l | p l      | g r p l  | all     | no          |
 | `match`          | g       | no       | g        | g       | g a         |
 | `highlights`     | a       | a        | no       | a       | a           |
-| `translations`   | all     | no       | no       | no      | no          |
+| `translations`   | all     | no       | g r      | all     | no          |
 | `plusCode`       | no      | g r p l  | no       | no      | no          |
 
 Options.
