@@ -108,7 +108,7 @@
       "name": "failover, cache and compare",
       "path": "packages/client/dist/plugins.js",
       "import": "{ cache, compare, failover }",
-      "limit": "2.4 kB"
+      "limit": "2.7 kB"
     },
     {
       "name": "og's native client alone",

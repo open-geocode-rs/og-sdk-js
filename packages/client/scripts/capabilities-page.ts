@@ -175,6 +175,13 @@ function operationPanel(list: Adapter[], operation: Operation): string {
 
 const pill = (state: State, text: string): string => `<span class="pill ${state}">${text}</span>`;
 
+const kept = (ms: number): string =>
+  ms === 0
+    ? pill("no", "Never")
+    : ms === Infinity
+      ? pill("yes", "No limit")
+      : pill("measured", `${Math.round(ms / 86_400_000)} days`);
+
 function overviewPanel(list: Adapter[]): string {
   const line = (name: string, state: (adapter: Adapter) => string): string =>
     `<tr><th scope="row"><code>${name}</code></th>${list.map((adapter) => `<td>${state(adapter)}</td>`).join("")}</tr>`;
@@ -198,8 +205,38 @@ function overviewPanel(list: Adapter[]): string {
         ),
       )
       .join("");
-  return table(list, body);
+  const cached = line("cache", (adapter) => {
+    const own = adapter.capabilities.cache?.maxTtl ?? 0;
+    const others = OPERATIONS.filter((operation) => {
+      const rule = adapter.capabilities[operation]?.cache;
+      return rule !== undefined && rule.maxTtl !== own;
+    });
+    return (
+      kept(own) +
+      (others.length > 0
+        ? `<small>${others.join(", ")}: ${kept(adapter.capabilities[others[0] as Operation]?.cache?.maxTtl ?? 0)}</small>`
+        : "")
+    );
+  });
+  return (
+    table(list, body + cached) +
+    `<p class="note">The <code>cache</code> row is how long a provider's answers may be kept. The <code>cache</code> plugin never keeps one longer, and says so when it shortens or skips. With <code>mapbox({ permanent: true })</code>, geocode, reverse and batch answers may be kept without limit.</p>` +
+    `<h2>Attribution</h2><p>You must show the result's <code>attribution</code> wherever you show its results. Each entry is a credit the provider requires, filled by its adapter. A provider may ask for more than text, such as a logo or a placement, so read its terms for how to show the credit.</p>` +
+    table(
+      list,
+      line("credit", (adapter) => `<small>${CREDITS[adapter.id] ?? ""}</small>`),
+    )
+  );
 }
+
+/** The credit each adapter fills. */
+const CREDITS: Record<string, string> = {
+  og: "What og sends, such as © OpenStreetMap contributors",
+  google: "Google Maps, then each data provider Google names",
+  mapbox: "The notice Mapbox sends with each answer",
+  here: "© year HERE",
+  precisely: "None stated publicly. Check your contract",
+};
 
 /** The whole page. */
 export function page(list: Adapter[] = adapters()): string {
@@ -232,7 +269,7 @@ export function page(list: Adapter[] = adapters()): string {
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1040px;margin:0 auto;padding:32px 16px 64px}
-h1{font-size:26px;margin:0 0 4px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 6px}
 p{margin:6px 0;max-width:72ch}.mut,.note{color:var(--mut)}
 code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
 .legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin:16px 0 20px;padding:0;list-style:none;font-size:14px}
@@ -249,7 +286,7 @@ thead th{background:var(--head);font-size:13px;font-weight:600;position:sticky;t
 th[scope=row]{text-align:left;font-weight:400;width:38%}
 th small,td small{display:block;color:var(--mut);font-size:12.5px}
 tr.group th{background:var(--head);text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
-.pill{display:inline-block;min-width:76px;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:600}
+.pill{display:inline-block;white-space:nowrap;min-width:76px;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:600}
 .yes{color:var(--yes);background:var(--yes-bg)}.no,.none{color:var(--no);background:var(--no-bg)}
 .measured{color:var(--mea);background:var(--mea-bg)}.planned{color:var(--pla);background:var(--pla-bg)}
 .none{font-weight:400}

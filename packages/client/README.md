@@ -102,6 +102,21 @@ Three rules hold for every provider.
 
 No value is ever made up to fill a gap.
 
+### Attribution
+
+You must show `attribution` wherever you show results.
+Each entry is a credit its provider requires, and the adapter fills it for you.
+
+| Adapter       | Credit                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `og()`        | The credits og sends, such as `© OpenStreetMap contributors`, with their licence and link.   |
+| `google()`    | `Google Maps`, unchanged and untranslated, then each data provider Google names for a place. |
+| `mapbox()`    | The notice Mapbox sends with each answer.                                                    |
+| `here()`      | `© <year> HERE`.                                                                             |
+| `precisely()` | None. Precisely's public documentation states no credit, so check your contract.             |
+
+A provider may ask for more than text, such as a logo or a placement, so read its terms for how to show the credit.
+
 ### Default fields
 
 | Field                   | Type                   | Meaning                                                                                                                                    |
@@ -343,8 +358,32 @@ Answers a repeated call from memory.
 cache({ ttl: 60_000, max: 1000, operations: ["geocode", "reverse"] });
 ```
 
+A cache never keeps an answer longer than its provider allows.
+Each adapter states its provider's rule in `capabilities.cache.maxTtl`, in milliseconds, and the plugin follows it by default.
+
+| Adapter       | An answer may be kept                                                                 |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `og()`        | Without limit.                                                                        |
+| `google()`    | For 30 days.                                                                          |
+| `mapbox()`    | Not at all. With `permanent: true`, geocode, reverse and batch answers without limit. |
+| `here()`      | Not at all, until its terms are checked.                                              |
+| `precisely()` | Not at all, until its terms are checked.                                              |
+
+The plugin keeps an answer for the shorter of your `ttl` and the provider's rule, and keeps nothing where the rule is `0`.
+It never does so silently.
+`onLimit` is called each time, and without it the plugin warns on the console the first time each case arises.
+
+```ts
+cache({
+  ttl: 90 * 86_400_000,
+  onLimit: ({ provider, operation, action, allowed }) => log(provider, operation, action, allowed),
+});
+```
+
+An answer that `failover` got from another provider is not kept, since the cache was set up for the provider you asked.
+`mapbox({ accessToken, permanent: true })` tells Mapbox you intend to store geocode, reverse and batch answers, which Mapbox bills and licenses differently.
 Pass `store` to keep entries somewhere of your own, such as a shared key-value store.
-Check what your provider's terms let you keep, and for how long, before you raise `ttl`.
+The rules above are the SDK's reading of each provider's public terms, so check your own contract before you rely on one.
 
 ### compare
 
