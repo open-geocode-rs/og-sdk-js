@@ -70,6 +70,7 @@ export function fakeAdapter(
       autocomplete: { ...all, coordinates: true },
       places: all,
       lookup: all,
+      cache: { maxTtl: Infinity },
     },
     geocode: run("geocode"),
     reverse: run("reverse"),

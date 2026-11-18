@@ -211,6 +211,8 @@ export class Geocoder<A extends Adapter = Adapter> {
       operations.reverse = { ...reverse, fields: [...reverse.fields, "distance"] };
     this.capabilities = {
       ...operations,
+      // An adapter that states no cache rule is one whose answers may never be kept.
+      cache: operations.cache ?? { maxTtl: 0 },
       batch: {
         geocode: mode(batch?.geocode, operations.geocode),
         reverse: mode(batch?.reverse, operations.reverse),

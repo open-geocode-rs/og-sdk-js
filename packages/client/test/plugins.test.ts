@@ -8,6 +8,8 @@ import {
 } from "../src/index.ts";
 import {
   cache,
+  type CacheLimitEvent,
+  type CacheStore,
   compare,
   compareResults,
   type CompareReport,
@@ -167,6 +169,159 @@ describe("cache", () => {
       "autocomplete",
       "autocomplete",
     ]);
+  });
+});
+
+/** A store that records how long each answer was kept for. */
+const recorder = () => {
+  const kept: number[] = [];
+  const inner = memoryStore();
+  const store: CacheStore = {
+    get: (key) => inner.get(key),
+    set: (key, value, ttl) => {
+      kept.push(ttl);
+      return inner.set(key, value, ttl);
+    },
+  };
+  return { store, kept };
+};
+
+describe("cache, under a provider's rule", () => {
+  const DAY = 86_400_000;
+  it("keeps nothing where the provider allows none, and says so", async () => {
+    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+    adapter.capabilities.cache = { maxTtl: 0 };
+    const { store, kept } = recorder();
+    const events: CacheLimitEvent[] = [];
+    const geo = new Geocoder({
+      adapter,
+      plugins: [cache({ store, ttl: DAY, onLimit: (event) => events.push(event) })],
+    });
+    await geo.geocode("x");
+    const second = await geo.geocode("x").withResponse();
+    expect(adapter.native.calls).toHaveLength(2);
+    expect(second.response).toBeInstanceOf(Response);
+    expect(kept).toEqual([]);
+    expect(events).toEqual([
+      { provider: "a", operation: "geocode", action: "skipped", asked: DAY, allowed: 0 },
+      { provider: "a", operation: "geocode", action: "skipped", asked: DAY, allowed: 0 },
+    ]);
+  });
+
+  it("treats an adapter that states no rule as one that allows none", async () => {
+    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+    delete adapter.capabilities.cache;
+    const events: CacheLimitEvent[] = [];
+    const geo = new Geocoder({
+      adapter,
+      plugins: [cache({ onLimit: (event) => events.push(event) })],
+    });
+    await geo.geocode("x");
+    await geo.geocode("x");
+    expect(adapter.native.calls).toHaveLength(2);
+    expect(events.map((event) => event.action)).toEqual(["skipped", "skipped"]);
+    expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
+  });
+
+  it("keeps an answer no longer than the provider allows, and says so", async () => {
+    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+    adapter.capabilities.cache = { maxTtl: 30 * DAY };
+    const { store, kept } = recorder();
+    const events: CacheLimitEvent[] = [];
+    const geo = new Geocoder({
+      adapter,
+      plugins: [cache({ store, ttl: 90 * DAY, onLimit: (event) => events.push(event) })],
+    });
+    await geo.geocode("x");
+    await geo.geocode("x");
+    expect(adapter.native.calls).toHaveLength(1);
+    expect(kept).toEqual([30 * DAY]);
+    expect(events).toEqual([
+      {
+        provider: "a",
+        operation: "geocode",
+        action: "shortened",
+        asked: 90 * DAY,
+        allowed: 30 * DAY,
+      },
+    ]);
+
+    // A ttl inside the rule is used as asked, with nothing to report.
+    const short = recorder();
+    const quiet: CacheLimitEvent[] = [];
+    const within = new Geocoder({
+      adapter,
+      plugins: [cache({ store: short.store, ttl: DAY, onLimit: (event) => quiet.push(event) })],
+    });
+    await within.geocode("y");
+    expect(short.kept).toEqual([DAY]);
+    expect(quiet).toEqual([]);
+  });
+
+  it("follows the rule of the operation where it has one of its own", async () => {
+    const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+    adapter.capabilities.cache = { maxTtl: 0 };
+    adapter.capabilities.geocode = {
+      ...adapter.capabilities.geocode!,
+      cache: { maxTtl: Infinity },
+    };
+    const { store, kept } = recorder();
+    const events: CacheLimitEvent[] = [];
+    const geo = new Geocoder({
+      adapter,
+      plugins: [cache({ store, ttl: DAY, onLimit: (event) => events.push(event) })],
+    });
+    await geo.geocode("x");
+    await geo.geocode("x");
+    await geo.places("x");
+    await geo.places("x");
+    expect(adapter.native.calls.map((call) => call.operation)).toEqual([
+      "geocode",
+      "places",
+      "places",
+    ]);
+    expect(kept).toEqual([DAY]);
+    expect(events.map((event) => `${event.operation} ${event.action}`)).toEqual([
+      "places skipped",
+      "places skipped",
+    ]);
+  });
+
+  it("does not keep an answer another provider gave in place of the one asked", async () => {
+    const down = fakeAdapter("a", () => Promise.reject(new APIConnectionError("down")));
+    const other = fakeAdapter("b", () => ({ results: [place()] }));
+    const { store, kept } = recorder();
+    const events: CacheLimitEvent[] = [];
+    const geo = new Geocoder({
+      adapter: down,
+      plugins: [
+        cache({ store, ttl: DAY, onLimit: (event) => events.push(event) }),
+        failover({ to: other }),
+      ],
+    });
+    expect((await geo.geocode("x")).provider).toBe("b");
+    expect(kept).toEqual([]);
+    expect(events).toEqual([
+      { provider: "b", operation: "geocode", action: "foreign", asked: DAY, allowed: Infinity },
+    ]);
+  });
+
+  it("warns on the console once per case when no reporter is given", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const adapter = fakeAdapter("a", () => ({ results: [place()] }));
+      adapter.capabilities.cache = { maxTtl: 0 };
+      const geo = new Geocoder({ adapter, plugins: [cache({ ttl: DAY })] });
+      await geo.geocode("x");
+      await geo.geocode("y");
+      await geo.places("x");
+      expect(warn.mock.calls.map(([message]) => message)).toEqual([
+        "[cache] a allows a geocode answer to be kept not at all, so it is not kept for the 1 days asked for.",
+        "[cache] a allows a places answer to be kept not at all, so it is not kept for the 1 days asked for.",
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

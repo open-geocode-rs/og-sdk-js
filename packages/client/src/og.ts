@@ -368,6 +368,8 @@ export function og(options: OgOptions): Adapter<Client> {
       places: capability("places", SEARCH),
       lookup: capability("lookup", ["language"]),
       batch: { geocode: true, reverse: true },
+      // The data is open and the server is your own, so an answer may be kept without limit.
+      cache: { maxTtl: Infinity },
     },
     async geocode(request, call) {
       const params = { ...common(request), ...layerOf(request.types) };

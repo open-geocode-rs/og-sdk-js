@@ -27,6 +27,7 @@ export {
 export type * from "./types.ts";
 export {
   batchItem,
+  cacheRule,
   chunk,
   createTransport,
   distance,
@@ -47,6 +48,7 @@ export {
   type AdapterResult,
   type BatchContext,
   type BatchGeocodeItem,
+  type CacheRule,
   type NativeCall,
   type NativeRequest,
   type OperationCapabilities,

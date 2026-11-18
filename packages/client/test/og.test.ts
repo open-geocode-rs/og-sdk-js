@@ -369,6 +369,11 @@ describe("the og adapter", () => {
   });
 });
 
+it("lets a cache keep og's answers without limit", () => {
+  const geo = new Geocoder({ adapter: og({ baseUrl: "http://og.test" }) });
+  expect(geo.capabilities.cache).toEqual({ maxTtl: Infinity });
+});
+
 // Runs against a real og server when OG_URL is set, for example OG_URL=http://127.0.0.1:8081.
 // OG_TEST_ADDRESS names an address the server's Pack holds. Default `24 Sussex Drive Ottawa`.
 describe.runIf(process.env["OG_URL"])("against a live og", () => {

@@ -32,8 +32,19 @@ import type {
   StructuredAddress,
 } from "./types.ts";
 
+/**
+ * How long a provider's answers may be kept.
+ * A cache never keeps an answer longer than its provider allows.
+ */
+export interface CacheRule {
+  /** Milliseconds an answer may be kept. `0` means never, and `Infinity` means there is no limit. */
+  maxTtl: number;
+}
+
 /** What one operation of an adapter supports. */
 export interface OperationCapabilities {
+  /** The cache rule of this operation, where it differs from the adapter's own. */
+  cache?: CacheRule;
   /** The request options the provider honours. Any other is left out and reported in `ignored`. */
   options: readonly OptionName[];
   /** The fields the provider can fill. Any other is `null` and reported in `unavailable`. */
@@ -50,6 +61,16 @@ export interface AdapterCapabilities {
   lookup?: OperationCapabilities;
   /** The batch operations the provider runs itself. Any other is emulated with single calls. */
   batch?: { geocode?: boolean; reverse?: boolean };
+  /**
+   * How long the provider's answers may be kept, for every operation that states no rule of its own.
+   * An adapter that states none is treated as one whose answers may never be kept.
+   */
+  cache?: CacheRule;
+}
+
+/** The cache rule that holds for one operation of an adapter. */
+export function cacheRule(capabilities: AdapterCapabilities, operation: Operation): CacheRule {
+  return capabilities[operation]?.cache ?? capabilities.cache ?? { maxTtl: 0 };
 }
 
 /** What an adapter returns for one call. */
