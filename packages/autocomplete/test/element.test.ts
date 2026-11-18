@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../src/index.ts";
-import { emptyAddress, Geocoder, type Adapter, type PlaceRecord } from "@open-geocode/client";
+import { mapboxSource } from "@open-geocode/autocomplete-core";
+import { mapbox } from "@open-geocode/client/mapbox";
 import type { OgAutocomplete, OgSelectEvent } from "../src/index.ts";
 
 const feature = (label: string) => ({
@@ -9,17 +10,8 @@ const feature = (label: string) => ({
   properties: { id: `osm:node:${label.length}`, layer: "address", label, name: label },
 });
 
-const suggestion = (id: string, label: string, located: boolean): PlaceRecord => ({
-  id,
-  type: "address",
-  name: label,
-  label,
-  location: located ? { lat: 51.5, lon: -0.12 } : null,
-  accuracy: null,
-  confidence: null,
-  distance: null,
-  address: emptyAddress(),
-});
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
 
 let fetch: ReturnType<typeof vi.fn>;
 
@@ -97,66 +89,60 @@ describe("<og-autocomplete>", () => {
     expect(input.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("passes its attributes on as search options", async () => {
+  it("passes its attributes on as og parameters", async () => {
     const { el, input } = await mount();
     el.setAttribute("limit", "3");
     el.setAttribute("country", "ca, us");
-    el.setAttribute("types", "address,street");
+    el.setAttribute("layer", "address");
     el.setAttribute("focus", "-79.38,43.65");
-    el.setAttribute("language", "fr");
+    el.setAttribute("lang", "fr, en");
     await type(input, "10 King");
     const url = new URL(String(fetch.mock.calls[0]![0]));
     expect(Object.fromEntries(url.searchParams)).toEqual({
       q: "10 King",
       limit: "3",
       country: "CA,US",
+      layer: "address",
       focus: "-79.38,43.65",
-      lang: "fr",
+      lang: "fr,en",
     });
   });
 
-  it("works with any adapter, and fetches coordinates a suggestion came without", async () => {
-    const sessions: (string | undefined)[] = [];
-    const fields = { options: ["limit", "session"], fields: ["id", "location"] } as const;
-    const vendor: Adapter = {
-      id: "vendor",
-      native: undefined,
-      capabilities: { autocomplete: { ...fields, coordinates: false }, lookup: fields },
-      async autocomplete(request) {
-        sessions.push(request.session);
-        return {
-          results: [suggestion("a", "1 High St, London", false)],
-          raw: null,
-          response: undefined,
-        };
-      },
-      async lookup(request) {
-        sessions.push(request.session);
-        return {
-          results: [suggestion(request.ids[0]!, "1 High St, London", true)],
-          raw: null,
-          response: undefined,
-        };
-      },
-    };
+  it("works with a vendor client's source, and fetches coordinates a suggestion came without", async () => {
+    fetch.mockImplementation(async (url: string) =>
+      new URL(url).pathname.endsWith("/suggest")
+        ? json({ suggestions: [{ mapbox_id: "a", name: "1 High St", place_formatted: "London" }] })
+        : json({
+            type: "FeatureCollection",
+            features: [
+              { type: "Feature", geometry: { type: "Point", coordinates: [-0.12, 51.5] } },
+            ],
+          }),
+    );
     const el = document.createElement("og-autocomplete") as OgAutocomplete;
     el.setAttribute("debounce", "0");
-    el.geocoder = new Geocoder({ adapter: vendor });
+    el.source = mapboxSource(mapbox({ baseUrl: "http://og.test" }));
     document.body.append(el);
     const input = el.shadowRoot!.querySelector("input")!;
     const picked = new Promise<OgSelectEvent>((resolve) =>
       el.addEventListener("og-select", (e) => resolve(e as OgSelectEvent)),
     );
     await type(input, "1 High");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(el.shadowRoot!.querySelector("li")!.textContent).toBe("1 High St, London");
     el.shadowRoot!.querySelector("li")!.click();
     const { detail } = await picked;
     expect(detail.id).toBe("a");
     expect(detail.location).toEqual({ lat: 51.5, lon: -0.12 });
     // The keystroke and the lookup that ends the search share one session.
-    expect(sessions).toHaveLength(2);
-    expect(sessions[0]).toBeTruthy();
-    expect(sessions[1]).toBe(sessions[0]);
+    const urls = fetch.mock.calls.map(([url]) => new URL(String(url)));
+    expect(urls.map((url) => url.pathname)).toEqual([
+      "/compat/mapbox/search/searchbox/v1/suggest",
+      "/compat/mapbox/search/searchbox/v1/retrieve/a",
+    ]);
+    expect(urls[0]!.searchParams.get("session_token")).toBeTruthy();
+    expect(urls[1]!.searchParams.get("session_token")).toBe(
+      urls[0]!.searchParams.get("session_token"),
+    );
   });
 
   it("submits the chosen label with its form", async () => {

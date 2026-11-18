@@ -1,21 +1,20 @@
 import {
   createAutocomplete,
-  geocoderSource,
+  ogSource,
   type Autocomplete,
-  type GeocoderSource,
+  type Source,
   type State,
+  type Suggestion,
 } from "@open-geocode/autocomplete-core";
-import { Geocoder, type Place, type PlaceType, type SearchOptions } from "@open-geocode/client";
-import { og } from "@open-geocode/client/og";
+import { type AutocompleteParams, createClient } from "@open-geocode/client";
 
-/** One suggestion, in the unified format every adapter answers in. */
-export type Suggestion = Place;
+export type { Suggestion };
 
 /** Fired when the user picks a suggestion. `detail` is the suggestion, with its coordinates. */
 export type OgSelectEvent = CustomEvent<Suggestion>;
 
-/** The search options the element passes on with every keystroke. */
-export type SuggestOptions = Omit<SearchOptions, "signal" | "session" | "include">;
+/** The parameters the element sends to og with every keystroke, built from its attributes. */
+export type SuggestParams = Omit<AutocompleteParams, "q">;
 
 const STYLE = `
 :host { display: block; position: relative; font: inherit; }
@@ -31,14 +30,16 @@ li[aria-selected="true"] { background: Highlight; color: HighlightText; }
  * `<og-autocomplete>` is an input that suggests addresses and places as the user types.
  * Built on `@open-geocode/autocomplete-core`, which owns the state, keyboard and ARIA.
  *
- * It asks og when `base-url` is set, or any provider when the `geocoder` property is set
- * to a `Geocoder` built with that provider's adapter.
+ * It asks the og server at `base-url`, or whatever its `source` property is set to,
+ * which is how it works with a vendor client.
  *
- * Its attributes are `base-url`, `placeholder`, `limit`, `country` (comma-separated ISO codes),
- * `types` (comma-separated result types), `focus` (`lon,lat`), `language`,
- * `debounce` (ms, default 150), `min-chars` (default 2), `name` (form field name).
- * Fires `og-select` with the chosen suggestion, and `og-error` when the provider fails.
- * A provider that suggests without coordinates is asked for them when the user picks.
+ * Its attributes are `base-url`, `placeholder`, `debounce` (ms, default 150), `min-chars` (default 2)
+ * and `name` (form field name).
+ * The attributes `limit`, `country` (comma-separated ISO codes), `layer`, `focus` (`lon,lat`),
+ * `bbox` and `lang` go to og with every keystroke, as og's own parameters.
+ * A source of your own carries its own parameters, so they do not apply to it.
+ * Fires `og-select` with the chosen suggestion, and `og-error` when the server fails.
+ * An API that suggests without coordinates is asked for them when the user picks.
  * Inside a `<form>`, its value is the chosen label.
  * Style it from outside with `::part(input)`, `::part(list)` and `::part(option)`.
  * While a search is slow, the host gets a `stalled` attribute for a spinner.
@@ -52,18 +53,18 @@ export class OgAutocomplete extends HTMLElement {
     "min-chars",
     "limit",
     "country",
-    "types",
+    "layer",
     "focus",
-    "language",
+    "bbox",
+    "lang",
   ];
 
   readonly #internals: ElementInternals;
   readonly #input: HTMLInputElement;
   readonly #list: HTMLUListElement;
   #core: Autocomplete<Suggestion> | undefined;
-  #geocoder: Geocoder | undefined;
-  #own: Geocoder | undefined;
-  #source: GeocoderSource<Suggestion> | undefined;
+  #given: Source<Suggestion> | undefined;
+  #source: Source<Suggestion> | undefined;
   #painted: Suggestion[] | undefined;
 
   constructor() {
@@ -94,22 +95,20 @@ export class OgAutocomplete extends HTMLElement {
 
   attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
     if (name === "placeholder") this.#input.placeholder = value ?? "";
-    else {
-      if (name === "base-url") this.#own = undefined;
-      this.#rebuild();
-    }
+    else this.#rebuild();
   }
 
   /**
-   * The geocoder that answers. Set it to use any provider.
+   * Where suggestions come from. Set it to a source from `@open-geocode/autocomplete-core`,
+   * such as `mapboxSource(client)`, to use a vendor client.
    * When unset, the element asks the og server at `base-url`.
    */
-  get geocoder(): Geocoder | undefined {
-    return this.#geocoder;
+  get source(): Source<Suggestion> | undefined {
+    return this.#given;
   }
 
-  set geocoder(geocoder: Geocoder | undefined) {
-    this.#geocoder = geocoder;
+  set source(source: Source<Suggestion> | undefined) {
+    this.#given = source;
     this.#rebuild();
   }
 
@@ -140,33 +139,22 @@ export class OgAutocomplete extends HTMLElement {
     return this.hasAttribute(name) && Number.isFinite(value) ? value : fallback;
   }
 
-  #options(): SuggestOptions {
-    const options: SuggestOptions = { limit: this.#number("limit", 5) };
-    const list = (name: string): string[] | undefined => {
-      const items = (this.getAttribute(name) ?? "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-      return items.length > 0 ? items : undefined;
-    };
-    const countries = list("country");
-    if (countries) options.countries = countries;
-    const types = list("types");
-    if (types) options.types = types as PlaceType[];
-    const language = list("language");
-    if (language) options.language = language;
-    const [lon, lat] = (list("focus") ?? []).map(Number);
-    if (lon !== undefined && lat !== undefined && Number.isFinite(lon) && Number.isFinite(lat))
-      options.focus = { lat, lon };
-    return options;
+  #params(): SuggestParams {
+    const params: SuggestParams = { limit: this.#number("limit", 5) };
+    for (const name of ["country", "layer", "focus", "bbox", "lang"] as const) {
+      // A list written with spaces after its commas is still one og reads.
+      const value = this.getAttribute(name)?.replace(/\s+/g, "");
+      if (value)
+        (params as Record<string, string>)[name] = name === "country" ? value.toUpperCase() : value;
+    }
+    return params;
   }
 
   #ensureCore(): Autocomplete<Suggestion> {
     if (this.#core) return this.#core;
     const baseUrl = this.getAttribute("base-url");
-    if (!this.#geocoder && baseUrl) this.#own ??= new Geocoder({ adapter: og({ baseUrl }) });
-    const geocoder = this.#geocoder ?? this.#own;
-    const source = geocoder ? geocoderSource(geocoder, this.#options()) : undefined;
+    const source: Source<Suggestion> | undefined =
+      this.#given ?? (baseUrl ? ogSource(createClient({ baseUrl }), this.#params()) : undefined);
     this.#source = source;
     const core = createAutocomplete<Suggestion>({
       getItems: source ? source.getItems : async () => [],
@@ -188,7 +176,7 @@ export class OgAutocomplete extends HTMLElement {
   }
 
   /** Fires `og-select`, after fetching the coordinates of a suggestion that came without them. */
-  async #select(item: Suggestion, source: GeocoderSource<Suggestion> | undefined): Promise<void> {
+  async #select(item: Suggestion, source: Source<Suggestion> | undefined): Promise<void> {
     let detail = item;
     try {
       if (source) detail = await source.resolve(item);
@@ -196,7 +184,7 @@ export class OgAutocomplete extends HTMLElement {
       this.dispatchEvent(new CustomEvent("og-error", { detail: error }));
       return;
     }
-    // A newer geocoder or setting replaced this one while the lookup ran.
+    // A newer source or setting replaced this one while the lookup ran.
     if (source !== this.#source) return;
     this.dispatchEvent(new CustomEvent("og-select", { detail, bubbles: true, composed: true }));
   }
