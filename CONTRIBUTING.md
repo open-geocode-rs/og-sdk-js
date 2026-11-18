@@ -6,16 +6,28 @@ Never edit `packages/client/src/schema.gen.ts` by hand.
 Regenerate it with `bun run gen` when og's API contract changes.
 Package code must not use APIs that exist only in Node, Bun or Deno.
 
-## Adapters
+## Clients
 
-An adapter translates one provider's API to the unified format in `packages/client/src/types.ts` and does nothing else.
-It never makes up a value.
-A field the provider did not send is `null`, and a field or option the provider cannot serve is left out of the adapter's `capabilities`.
-Its tests replay responses in the provider's documented shape, kept under `packages/client/test/fixtures`.
-Those fixtures are synthetic, so every value in a new one must be made up, never copied from a provider's documentation.
+`packages/client/src/client.ts` is the client for og's own API.
+Its types come from og's contract, and it answers in og's own shape.
+
+`google.ts`, `mapbox.ts`, `here.ts` and `precisely.ts` each speak one vendor's API.
+A vendor client uses the vendor's method names and request shape, and returns the server's JSON untouched.
+It never translates, renames or fills in a value.
+The translation between a vendor's API and og's data lives in og's server, under `/compat/<vendor>`.
+Its request and response types are written from the vendor's documented API, in the matching `.types.ts` file.
+
+Every client is built on `base.ts`, which owns the transport, the plugins and the one error class.
+A client imports from `base.ts`, `core.ts` and `errors.ts` only, never from another client.
+Run `bun run test:ecosystem` to check that a client still pulls in no other vendor's code.
+
+## Tests
+
+Each vendor client has two test files.
+`<vendor>.test.ts` replays responses in the vendor's documented shape, kept under `packages/client/test/fixtures`.
+Those fixtures are synthetic, so every value in a new one must be made up, never copied from a vendor's documentation.
 The Google fixtures are the one exception, credited in `packages/client/test/fixtures/google/NOTICE.md`.
-Run `bun run docs:capabilities` after changing an adapter's `capabilities`, since the README's provider tables are built from them.
-Run `bun run test:ecosystem` to check that an adapter still pulls in no other provider's code.
+`<vendor>.compat.test.ts` runs against a real og server when `OG_URL` is set, and is skipped without it.
 
 ## Licence
 
