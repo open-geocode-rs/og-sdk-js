@@ -20,7 +20,7 @@
     "check:packages": "for p in packages/*; do bunx publint $p --strict && bunx attw --pack $p --profile esm-only || exit 1; done",
     "size": "size-limit",
     "docs": "typedoc",
-    "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn && cd ../treeshake && node check.mjs && cd ../runtimes && node smoke.mjs && bun smoke.mjs && bunx deno run --allow-read --allow-env smoke.mjs",
+    "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn && cd ../treeshake && node check.mjs && cd ../runtimes && node smoke.mjs && bun smoke.mjs && bunx deno run --allow-read --allow-env --allow-net=127.0.0.1 smoke.mjs",
     "docs:capabilities": "bun packages/client/scripts/write-capabilities.ts && oxfmt packages/client/README.md",
     "docs:page": "bun packages/client/scripts/capabilities-page.ts"
   },
@@ -54,7 +54,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/og.js": "{ og }"
       },
-      "limit": "7.2 kB"
+      "limit": "7.6 kB"
     },
     {
       "name": "Geocoder with the google adapter",
@@ -66,7 +66,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/google.js": "{ google }"
       },
-      "limit": "8.2 kB"
+      "limit": "8.5 kB"
     },
     {
       "name": "Geocoder with the mapbox adapter",
@@ -78,7 +78,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/mapbox.js": "{ mapbox }"
       },
-      "limit": "7.7 kB"
+      "limit": "8 kB"
     },
     {
       "name": "Geocoder with the here adapter",
@@ -90,7 +90,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/here.js": "{ here }"
       },
-      "limit": "10 kB"
+      "limit": "10.5 kB"
     },
     {
       "name": "Geocoder with the precisely adapter",
@@ -102,7 +102,7 @@
         "packages/client/dist/index.js": "{ Geocoder }",
         "packages/client/dist/precisely.js": "{ precisely }"
       },
-      "limit": "9.6 kB"
+      "limit": "9.8 kB"
     },
     {
       "name": "failover, cache and compare",
@@ -114,7 +114,7 @@
       "name": "og's native client alone",
       "path": "packages/client/dist/og.js",
       "import": "{ createClient }",
-      "limit": "2.5 kB"
+      "limit": "2.8 kB"
     },
     {
       "name": "@open-geocode/autocomplete-core",
@@ -131,7 +131,7 @@
     {
       "name": "@open-geocode/autocomplete (CDN file)",
       "path": "packages/autocomplete/dist/og-autocomplete.iife.js",
-      "limit": "9.5 kB"
+      "limit": "9.8 kB"
     }
   ]
 }

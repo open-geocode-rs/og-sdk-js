@@ -129,4 +129,64 @@ await new Promise((resolve) => setTimeout(resolve, 20));
 check(autocomplete.getState().items.length === 1, "the autocomplete got no suggestions");
 autocomplete.destroy();
 
+// Timeouts and cancellation against a real server and the runtime's own fetch,
+// since each runtime reports a signal that fired in its own way.
+const { createServer } = await import("node:http");
+const open = new Set();
+const server = createServer((request, response) => {
+  open.add(response);
+  // `/geocode` is never answered, and anything else is.
+  if (!request.url.startsWith("/geocode")) response.end(JSON.stringify(collection));
+});
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const real = new Geocoder({
+  adapter: og({
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    maxRetries: 0,
+    logLevel: "off",
+  }),
+});
+try {
+  const answered = await real.places("x");
+  check(answered.results.length === 1, "the real server did not answer");
+
+  const slow = await real.geocode("x", { timeout: 150 }).catch((thrown) => thrown);
+  check(slow instanceof GeocoderError && slow.code === "timeout", `a timeout read as ${slow.code}`);
+  check(
+    slow.cause?.cause?.name === "TimeoutError",
+    `a timeout's cause is ${slow.cause?.cause?.name}`,
+  );
+
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 100);
+  const stopped = await real.geocode("x", { signal: controller.signal }).catch((thrown) => thrown);
+  check(
+    stopped instanceof GeocoderError && stopped.code === "aborted",
+    `an abort read as ${stopped.code}`,
+  );
+  check(
+    stopped.cause?.cause?.name === "AbortError",
+    `an abort's cause is ${stopped.cause?.cause?.name}`,
+  );
+
+  const own = await real
+    .geocode("x", { signal: AbortSignal.timeout(100) })
+    .catch((thrown) => thrown);
+  check(
+    own instanceof GeocoderError && own.code === "timeout",
+    `a caller's timeout read as ${own.code}`,
+  );
+
+  // The caller aborts and the timeout fires close together, and the first to fire decides.
+  const racing = new AbortController();
+  setTimeout(() => racing.abort(), 50);
+  const raced = await real
+    .geocode("x", { signal: racing.signal, timeout: 400 })
+    .catch((thrown) => thrown);
+  check(raced.code === "aborted", `an abort before the timeout read as ${raced.code}`);
+} finally {
+  for (const response of open) response.destroy();
+  await new Promise((resolve) => server.close(resolve));
+}
+
 console.log("smoke ok");
