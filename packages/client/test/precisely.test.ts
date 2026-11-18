@@ -1,13 +1,19 @@
-/// <reference types="node" />
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Plugin, Position } from "../src/base.ts";
+import type { APIPromise } from "../src/core.ts";
 import {
   AuthenticationError,
   BadRequestError,
-  Geocoder,
-  type GeocoderError,
+  GeocoderError,
+  type GeocoderErrorCode,
   OgError,
-} from "../src/index.ts";
-import { precisely, type PreciselyOptions } from "../src/precisely.ts";
+} from "../src/errors.ts";
+import {
+  jobIdOf,
+  precisely,
+  type PreciselyClient,
+  type PreciselyOptions,
+} from "../src/precisely.ts";
 import autocompleteFixture from "./fixtures/precisely/autocomplete-200.json" with { type: "json" };
 import submitFixture from "./fixtures/precisely/bulk-submit-202.json" with { type: "json" };
 import cancelFixture from "./fixtures/precisely/cancel-200.json" with { type: "json" };
@@ -31,745 +37,983 @@ import tokenFixture from "./fixtures/precisely/token-200.json" with { type: "jso
 import tokenErrorFixture from "./fixtures/precisely/token-400.json" with { type: "json" };
 import uploadUrlFixture from "./fixtures/precisely/upload-url-200.json" with { type: "json" };
 import verifyFixture from "./fixtures/precisely/verify-200.json" with { type: "json" };
-import { type Fetch, fakeFetch, urlOf } from "./helpers.ts";
+import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply } from "./helpers.ts";
 
 const HOST = "https://api.cloud.precisely.com";
-/** `Apikey` and the base64 of `key:secret`. */
-const APIKEY = "Apikey a2V5OnNlY3JldA==";
+const OG = "https://og.example.com";
+const OG_ROOT = `${OG}/compat/precisely`;
+const KEY = "ak-live-0001";
+const SECRET = "shh-0002";
+/** `Basic` and the base64 of the key, a colon and the secret. */
+const BASIC = `Basic ${btoa(`${KEY}:${SECRET}`)}`;
+const BEARER = `Bearer ${tokenFixture.access_token}`;
+const TOKEN: Reply = { body: tokenFixture };
+const DAY = 86_400_000;
 
-const adapter = (fetch: typeof globalThis.fetch, options: Partial<PreciselyOptions> = {}) =>
+/** A client that asks Precisely itself. Its first request is the token call. */
+const onVendor = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
+  precisely({ apiKey: KEY, apiSecret: SECRET, fetch, logLevel: "off", ...options });
+
+/** A client that asks og. The key and secret are given to show that they are never sent. */
+const onOg = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
   precisely({
-    apiKey: "key",
-    apiSecret: "secret",
+    baseUrl: `${OG}/`,
+    apiKey: KEY,
+    apiSecret: SECRET,
     fetch,
     logLevel: "off",
     ...options,
-  } as PreciselyOptions);
-const geocoder = (fetch: typeof globalThis.fetch, options: Partial<PreciselyOptions> = {}) =>
-  new Geocoder({ adapter: adapter(fetch, options) });
+  });
 
-const initOf = (fetch: Fetch, call = 0): RequestInit => fetch.mock.calls[call]![1]!;
-const headersOf = (fetch: Fetch, call = 0) => initOf(fetch, call).headers as Record<string, string>;
-const bodyOf = (fetch: Fetch, call = 0) => JSON.parse(String(initOf(fetch, call).body));
-const caught = <E extends OgError = GeocoderError>(promise: PromiseLike<unknown>): Promise<E> =>
+const methodOf = (fetch: Fetch, call = 0): string | undefined => fetch.mock.calls[call]![1]?.method;
+const rawBodyOf = (fetch: Fetch, call = 0): unknown => fetch.mock.calls[call]![1]?.body;
+const urlsOf = (fetch: Fetch): string[] => fetch.mock.calls.map((call) => String(call[0]));
+
+const caught = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
   Promise.resolve(promise).then(
     () => {
       throw new Error("The call did not fail.");
     },
-    (error: E) => error,
+    (error: GeocoderError) => error,
   );
 
-const harrowmere = {
-  id: "PB_KEY:P0000T7KQ2WX:US",
-  type: "address",
-  name: "4820 KESTREL BLVD STE 210",
-  label: "4820 KESTREL BLVD STE 210, HARROWMERE OH 43917-6042, United States",
-  location: { lat: 40.117485, lon: -82.914362 },
-  accuracy: "rooftop",
-  confidence: null,
-  distance: null,
-  address: {
-    houseNumber: "4820",
-    street: "KESTREL",
-    unit: "210",
-    neighbourhood: null,
-    locality: "HARROWMERE",
-    district: "VELLACOTT COUNTY",
-    region: "Ohio",
-    regionCode: "OH",
-    postcode: "43917",
-    country: "United States",
-    countryCode: "US",
+const address = { addressLines: ["4820 Kestrel Blvd Ste 210, Harrowmere OH"], country: "USA" };
+const FILE_ID = "3c6e1a47-9d52-4b08-a7f3-61e0c5d2b894";
+const JOB_ID = "7e2b94c1-05da-4f36-8a17-c3d6f0b952e8";
+
+interface Case {
+  /** The method's dotted name on the client. */
+  name: string;
+  call(client: PreciselyClient): APIPromise<unknown>;
+  method: "GET" | "POST" | "DELETE";
+  /** The path with its query, the same under Precisely's host and under og's root. */
+  path: string;
+  /** The JSON body, or `undefined` for a request without one. */
+  body?: unknown;
+  /** Headers the params turn into, with lower-case names. */
+  headers?: Record<string, string>;
+  reply: Reply;
+}
+
+const CASES: Case[] = [
+  {
+    name: "geocode",
+    call: (client) =>
+      client.geocode({
+        "X-Request-Id": "trace-1",
+        preferences: { maxResults: 1, clientLocale: "en_US", matchMode: "RELAXED" },
+        addresses: [{ addressId: "1", ...address }],
+      }),
+    method: "POST",
+    path: "/v1/geocode",
+    body: {
+      preferences: { maxResults: 1, clientLocale: "en_US", matchMode: "RELAXED" },
+      addresses: [{ addressId: "1", ...address }],
+    },
+    headers: { "x-request-id": "trace-1" },
+    reply: { body: geocodeFixture },
   },
+  {
+    name: "reverseGeocode",
+    call: (client) =>
+      client.reverseGeocode({
+        preferences: { distance: { value: 150, distanceUnit: "METER" } },
+        locations: [
+          { addressId: "1", longitude: -105.318274, latitude: 39.526618, country: "USA" },
+        ],
+      }),
+    method: "POST",
+    path: "/v1/reverse-geocode",
+    body: {
+      preferences: { distance: { value: 150, distanceUnit: "METER" } },
+      locations: [{ addressId: "1", longitude: -105.318274, latitude: 39.526618, country: "USA" }],
+    },
+    reply: { body: reverseFixture },
+  },
+  {
+    name: "lookup",
+    call: (client) =>
+      client.lookup({ keys: [{ key: "P0000ZZ9K3QX", type: "PB_KEY", country: "USA" }] }),
+    method: "POST",
+    path: "/v1/lookup",
+    body: { keys: [{ key: "P0000ZZ9K3QX", type: "PB_KEY", country: "USA" }] },
+    reply: { body: lookupFixture },
+  },
+  {
+    name: "verify",
+    call: (client) => client.verify({ addresses: [{ addressId: "1", ...address }] }),
+    method: "POST",
+    path: "/v1/verify",
+    body: { addresses: [{ addressId: "1", ...address }] },
+    reply: { body: verifyFixture },
+  },
+  {
+    name: "autocomplete",
+    call: (client) =>
+      client.autocomplete({
+        "X-Transaction-Id": "0b9f6f3e-52c1-4d0a-9a57-3f2f3c1d8e44",
+        "X-Request-Id": "trace-2",
+        preferences: { maxResults: 2 },
+        address: { addressLines: ["612 Lark"], country: "USA" },
+      }),
+    method: "POST",
+    path: "/v1/autocomplete",
+    body: {
+      preferences: { maxResults: 2 },
+      address: { addressLines: ["612 Lark"], country: "USA" },
+    },
+    headers: {
+      "x-transaction-id": "0b9f6f3e-52c1-4d0a-9a57-3f2f3c1d8e44",
+      "x-request-id": "trace-2",
+    },
+    reply: { body: autocompleteFixture },
+  },
+  {
+    name: "expressAutocomplete",
+    call: (client) =>
+      client.expressAutocomplete({ address: { addressLines: ["612 Lark"], country: "USA" } }),
+    method: "POST",
+    path: "/v1/express-autocomplete",
+    body: { address: { addressLines: ["612 Lark"], country: "USA" } },
+    reply: { body: autocompleteFixture },
+  },
+  {
+    name: "expressAutocompleteV2",
+    call: (client) =>
+      client.expressAutocompleteV2({
+        preferences: {
+          filterBias: { type: "filter", fields: { include: { city: { value: "Harrowmere" } } } },
+        },
+        address: { addressLines: ["612 Lark"], country: "USA" },
+      }),
+    method: "POST",
+    path: "/v2/express-autocomplete",
+    body: {
+      preferences: {
+        filterBias: { type: "filter", fields: { include: { city: { value: "Harrowmere" } } } },
+      },
+      address: { addressLines: ["612 Lark"], country: "USA" },
+    },
+    reply: { body: autocompleteFixture },
+  },
+  {
+    name: "bulk.uploadUrl",
+    call: (client) => client.bulk.uploadUrl({ fileName: "harbour_batch" }),
+    method: "POST",
+    path: "/v2/files/upload-url",
+    body: { fileName: "harbour_batch" },
+    reply: { body: uploadUrlFixture },
+  },
+  {
+    name: "bulk.files",
+    call: (client) => client.bulk.files(),
+    method: "GET",
+    path: "/v2/files",
+    reply: { body: filesFixture },
+  },
+  {
+    name: "bulk.deleteFile",
+    call: (client) => client.bulk.deleteFile({ fileId: "a b/c", "X-Request-Id": "trace-3" }),
+    method: "DELETE",
+    path: "/v2/files/a%20b%2Fc",
+    headers: { "x-request-id": "trace-3" },
+    reply: { body: deleteFileFixture },
+  },
+  {
+    name: "bulk.geocode",
+    call: (client) =>
+      client.bulk.geocode({
+        "X-CASS-FLOW": "no_report",
+        fileId: FILE_ID,
+        delimiter: ",",
+        preferences: { maxResults: 1, customPreferences: { DATA_OPTION: "premium" } },
+        notifyEmails: ["ops@example.com"],
+      }),
+    method: "POST",
+    path: "/v2/bulk-geocode",
+    body: {
+      fileId: FILE_ID,
+      delimiter: ",",
+      preferences: { maxResults: 1, customPreferences: { DATA_OPTION: "premium" } },
+      notifyEmails: ["ops@example.com"],
+    },
+    headers: { "x-cass-flow": "no_report" },
+    reply: { status: 202, body: submitFixture },
+  },
+  {
+    name: "bulk.verify",
+    call: (client) =>
+      client.bulk.verify({
+        fileId: FILE_ID,
+        reportDetails: { listProcessorName: "Harbour Mailing", listNameId: "file_1" },
+      }),
+    method: "POST",
+    path: "/v2/bulk-verify",
+    body: {
+      fileId: FILE_ID,
+      reportDetails: { listProcessorName: "Harbour Mailing", listNameId: "file_1" },
+    },
+    reply: { status: 202, body: submitFixture },
+  },
+  {
+    name: "bulk.jobs",
+    call: (client) => client.bulk.jobs({ status: "running" }),
+    method: "GET",
+    path: "/v2/bulk/jobs?status=running",
+    reply: { body: jobsFixture },
+  },
+  {
+    name: "bulk.jobs without a status",
+    call: (client) => client.bulk.jobs(),
+    method: "GET",
+    path: "/v2/bulk/jobs",
+    reply: { body: jobsFixture },
+  },
+  {
+    name: "bulk.status",
+    call: (client) => client.bulk.status({ jobId: JOB_ID }),
+    method: "GET",
+    path: `/v2/bulk/jobs/${JOB_ID}`,
+    reply: { body: jobStatusFixture },
+  },
+  {
+    name: "bulk.cancel",
+    call: (client) => client.bulk.cancel({ jobId: JOB_ID }),
+    method: "DELETE",
+    path: `/v2/bulk/jobs/${JOB_ID}`,
+    reply: { body: cancelFixture },
+  },
+];
+
+/** What every request of a case must look like, whichever server it went to. */
+function expectRequest(fetch: Fetch, call: number, root: string, expected: Case): void {
+  expect(String(fetch.mock.calls[call]![0])).toBe(`${root}${expected.path}`);
+  expect(methodOf(fetch, call)).toBe(expected.method);
+  const headers = headersOf(fetch, call);
+  expect(headers).toMatchObject({ accept: "application/json", ...expected.headers });
+  if (expected.body === undefined) expect(rawBodyOf(fetch, call)).toBeUndefined();
+  else {
+    expect(bodyOf(fetch, call)).toEqual(expected.body);
+    expect(headers["content-type"]).toBe("application/json");
+  }
+}
+
+/** A plugin that records the points of every answer that passes it. */
+const recorder = (): { plugin: Plugin; seen: Record<string, Position[]> } => {
+  const seen: Record<string, Position[]> = {};
+  return {
+    seen,
+    plugin: {
+      name: "recorder",
+      async handle(call, next) {
+        const outcome = await next();
+        seen[call.method] = call.positions(outcome.data);
+        return outcome;
+      },
+    },
+  };
 };
 
-const quillfield = {
-  id: "PB_KEY:P0000W5HN83C:US",
-  type: "address",
-  name: "9 TALLOWFIELD CT",
-  label: "9 TALLOWFIELD CT, QUILLFIELD CO 81194-3406, United States",
-  location: { lat: 39.526618, lon: -105.318274 },
-  accuracy: "rooftop",
-  confidence: null,
-  distance: null,
-  address: {
-    houseNumber: "9",
-    street: "TALLOWFIELD",
-    unit: null,
-    neighbourhood: null,
-    locality: "QUILLFIELD",
-    district: "MARROWDALE COUNTY",
-    region: "Colorado",
-    regionCode: "CO",
-    postcode: "81194",
-    country: "United States",
-    countryCode: "US",
-  },
-};
+describe("precisely", () => {
+  describe("the client", () => {
+    it("says which API it speaks and which server answers", () => {
+      expect(onVendor(fakeFetch())).toMatchObject({ shape: "precisely", server: "precisely" });
+      expect(onOg(fakeFetch())).toMatchObject({ shape: "precisely", server: "og" });
+    });
 
-describe("geocode", () => {
-  it("sends free text as an address line and maps the result", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture, headers: { "x-request-id": "req-1" } });
-    const answer = await geocoder(fetch)
-      .geocode("4820 Kestrel Blvd #210 Harrowmere, OH", {
-        limit: 3,
-        countries: ["us"],
-        language: "en",
-        bounds: [-84, 39, -82, 41],
-        include: ["addressDetails", "addressLines", "match", "highlights"],
-      })
-      .withResponse();
-    expect(initOf(fetch).method).toBe("POST");
-    expect(urlOf(fetch).href).toBe(`${HOST}/v1/geocode`);
-    expect(headersOf(fetch)).toMatchObject({
-      authorization: APIKEY,
-      "content-type": "application/json",
+    it("needs an og server or both the key and the secret", () => {
+      for (const options of [{}, { apiKey: KEY }, { apiSecret: SECRET }]) {
+        let thrown: unknown;
+        try {
+          precisely(options);
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(GeocoderError);
+        expect(thrown).toMatchObject({ code: "invalid_request", provider: "precisely" });
+      }
     });
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { maxResults: 3, returnAllInfo: true },
-      addresses: [
-        { addressId: "0", addressLines: ["4820 Kestrel Blvd #210 Harrowmere, OH"], country: "US" },
-      ],
+
+    it("needs no key when an og server is given", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture });
+      const client = precisely({ baseUrl: OG, fetch, logLevel: "off" });
+      await client.geocode({ addresses: [address] });
+      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/v1/geocode`]);
     });
-    expect(answer.requestId).toBe("req-1");
-    expect(answer.data).toEqual({
-      provider: "precisely",
-      operation: "geocode",
-      results: [
-        {
-          ...harrowmere,
-          addressDetails: {
-            unitType: "STE",
-            building: null,
-            floor: null,
-            sublocality: null,
-            postcodeSuffix: "6042",
-          },
-          addressLines: ["4820 KESTREL BLVD STE 210", "HARROWMERE OH 43917-6042", "United States"],
-          match: {
-            score: 0.93,
-            label: null,
-            components: {
-              houseNumber: "matched",
-              region: "matched",
-              district: "unmatched",
-              locality: "matched",
-              street: "matched",
-              postcode: "unmatched",
-              unit: "unmatched",
-            },
-          },
-          highlights: null,
-        },
-      ],
-      // Precisely's public documentation states no credit a customer must show with a result, so none is made up.
-      attribution: [],
-      unavailable: ["confidence", "distance", "highlights"],
-      ignored: ["language", "bounds"],
+
+    it("reads the job ID out of a status URL", () => {
+      expect(jobIdOf(submitFixture.statusUrl)).toBe(JOB_ID);
+      expect(jobIdOf(`${OG_ROOT}/v2/bulk/jobs/abc123/?x=1#y`)).toBe("abc123");
     });
   });
 
-  it("sends a structured address as discrete fields", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture });
-    const answer = await geocoder(fetch).geocode({
-      houseNumber: "4820",
-      street: "Kestrel Blvd",
-      locality: "Harrowmere",
-      region: "OH",
-      postcode: "43917",
-      country: "USA",
+  describe.each(CASES)("$name", (expected) => {
+    it("asks Precisely with a bearer token and hands back its answer untouched", async () => {
+      const fetch = fakeFetch(TOKEN, expected.reply);
+      const outcome = await expected.call(onVendor(fetch)).withResponse();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expectRequest(fetch, 1, HOST, expected);
+      expect(headersOf(fetch, 1)["authorization"]).toBe(BEARER);
+      expect(outcome.data).toEqual(expected.reply.body);
+      expect(outcome.server).toBe("precisely");
+      expect(outcome.response?.status).toBe(expected.reply.status ?? 200);
     });
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { returnAllInfo: true },
-      addresses: [
-        {
-          addressId: "0",
-          addressNumber: "4820",
-          street: "Kestrel Blvd",
-          city: "Harrowmere",
-          admin1: "OH",
-          postalCode: "43917",
-          country: "USA",
-        },
-      ],
+
+    it("asks og with no token, no key and no secret", async () => {
+      const fetch = fakeFetch(expected.reply);
+      const outcome = await expected.call(onOg(fetch)).withResponse();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expectRequest(fetch, 0, OG_ROOT, expected);
+      expect(headersOf(fetch)["authorization"]).toBeUndefined();
+      const sent = JSON.stringify(fetch.mock.calls);
+      for (const credential of [KEY, SECRET, BASIC.slice(6), "Bearer", "Basic"])
+        expect(sent).not.toContain(credential);
+      expect(outcome.data).toEqual(expected.reply.body);
+      expect(outcome.server).toBe("og");
+      expect(outcome.cache).toEqual({ maxTtl: Infinity });
     });
-    expect(answer.ignored).toEqual([]);
-    expect(answer.results).toEqual([harrowmere]);
   });
 
-  it("sends a structured street line as an address line, and falls back to the default country", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture });
-    await geocoder(fetch, { defaultCountry: "USA" }).geocode({
-      address: "4820 Kestrel Blvd #210",
-      locality: "Harrowmere",
+  describe("token", () => {
+    it("trades the key and secret at Precisely, as HTTP Basic with a form body", async () => {
+      const fetch = fakeFetch(TOKEN);
+      const outcome = await onVendor(fetch).token().withResponse();
+      expect(urlsOf(fetch)).toEqual([`${HOST}/auth/v2/token`]);
+      expect(methodOf(fetch)).toBe("POST");
+      expect(headersOf(fetch)).toMatchObject({
+        authorization: BASIC,
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      });
+      expect(rawBodyOf(fetch)).toBe("grant_type=client_credentials&scope=default");
+      expect(outcome.data).toEqual(tokenFixture);
+      expect(outcome.cache).toEqual({ maxTtl: 0 });
     });
-    expect(bodyOf(fetch).addresses).toEqual([
-      {
-        addressId: "0",
-        addressLines: ["4820 Kestrel Blvd #210"],
-        city: "Harrowmere",
-        country: "USA",
-      },
-    ]);
-  });
 
-  it("returns the raw record and body when asked", async () => {
-    const answer = await geocoder(fakeFetch({ body: geocodeFixture })).geocode("x", {
-      countries: ["US"],
-      include: ["raw"],
+    it("asks og for a token without the key and secret", async () => {
+      const fetch = fakeFetch(TOKEN);
+      expect(await onOg(fetch).token()).toEqual(tokenFixture);
+      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/auth/v2/token`]);
+      expect(headersOf(fetch)["authorization"]).toBeUndefined();
+      expect(rawBodyOf(fetch)).toBe("grant_type=client_credentials&scope=default");
     });
-    expect(answer.raw).toEqual(geocodeFixture);
-    expect(answer.results[0]!.raw).toEqual(geocodeFixture.responses[0]!.results[0]);
   });
 
-  it("answers nothing for ZERO_RESULTS", async () => {
-    const fetch = fakeFetch({ body: { responses: [{ addressId: "0", status: "ZERO_RESULTS" }] } });
-    const answer = await geocoder(fetch).geocode("nowhere", { countries: ["US"] });
-    expect(answer.results).toEqual([]);
-  });
-
-  it("fails without a country, before any request", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture });
-    const error = await caught(geocoder(fetch).geocode("4820 Kestrel Blvd"));
-    expect(error.code).toBe("invalid_request");
-    expect(error.message).toMatch(/^Precisely needs a country\./);
-    expect(error.operation).toBe("geocode");
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("refuses more than one country", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture });
-    const error = await caught(geocoder(fetch).geocode("x", { countries: ["US", "CA"] }));
-    expect(error.code).toBe("unsupported");
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("sends a bearer token from a function", async () => {
-    const fetch = fakeFetch({ body: geocodeFixture });
-    const token = vi.fn(async () => "jwt");
-    const geo = new Geocoder({
-      adapter: precisely({ token, fetch, logLevel: "off", baseUrl: "https://proxy.test/geo/" }),
+  describe("the bearer token", () => {
+    afterEach(() => {
+      vi.useRealTimers();
     });
-    await geo.geocode("x", { countries: ["US"] });
-    expect(urlOf(fetch).href).toBe("https://proxy.test/geo/v1/geocode");
-    expect(headersOf(fetch).authorization).toBe("Bearer jwt");
-    expect(token).toHaveBeenCalledTimes(1);
-  });
-});
 
-describe("reverse", () => {
-  it("sends the point with the default country and maps the result", async () => {
-    const fetch = fakeFetch({ body: reverseFixture });
-    const answer = await geocoder(fetch, { defaultCountry: "USA" }).reverse(
-      { lat: 39.52688, lon: -105.31854 },
-      { limit: 1, include: ["addressDetails", "match"] },
-    );
-    expect(urlOf(fetch).href).toBe(`${HOST}/v1/reverse-geocode`);
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { maxResults: 1, returnAllInfo: true },
-      locations: [{ addressId: "0", longitude: -105.31854, latitude: 39.52688, country: "USA" }],
+    it("is fetched once and kept for the calls that follow", async () => {
+      const fetch = fakeFetch(TOKEN, { body: geocodeFixture });
+      const client = onVendor(fetch);
+      await client.geocode({ addresses: [address] });
+      await client.bulk.files();
+      await client.autocomplete({ address });
+      expect(urlsOf(fetch)).toEqual([
+        `${HOST}/auth/v2/token`,
+        `${HOST}/v1/geocode`,
+        `${HOST}/v2/files`,
+        `${HOST}/v1/autocomplete`,
+      ]);
+      expect(headersOf(fetch, 0)["authorization"]).toBe(BASIC);
+      for (const call of [1, 2, 3]) expect(headersOf(fetch, call)["authorization"]).toBe(BEARER);
     });
-    expect(answer.results).toEqual([
-      {
-        ...quillfield,
-        distance: 36.981300000000005,
-        addressDetails: {
-          unitType: null,
-          building: null,
-          floor: null,
-          sublocality: null,
-          postcodeSuffix: "3406",
-        },
-        match: null,
-      },
-    ]);
-    expect(answer.unavailable).toEqual(["confidence", "match"]);
-  });
 
-  it("fails without a country", async () => {
-    const error = await caught(geocoder(fakeFetch({})).reverse({ lat: 39, lon: -105 }));
-    expect(error.code).toBe("invalid_request");
-    expect(error.message).toMatch(/^Precisely needs a country\./);
-  });
-});
-
-describe("autocomplete", () => {
-  const session = "6f2c81d4-3b7a-4e59-9c10-d2a45b8e7f31";
-
-  it("sends the origin and the transaction ID, and maps predictions with their location", async () => {
-    const fetch = fakeFetch({ body: autocompleteFixture });
-    const geo = geocoder(fetch);
-    expect(geo.capabilities.autocomplete?.coordinates).toBe(true);
-    const answer = await geo.autocomplete("615 Wrenlow", {
-      limit: 2,
-      countries: ["US"],
-      focus: { lat: 44.3, lon: -89.7 },
-      session,
-      include: ["highlights", "match", "addressLines"],
+    it("is fetched once for calls made at the same time", async () => {
+      const fetch = fakeFetch(TOKEN, { body: geocodeFixture });
+      const client = onVendor(fetch);
+      await Promise.all([
+        client.geocode({ addresses: [address] }),
+        client.lookup({ keys: [{ key: "k", type: "PB_KEY", country: "USA" }] }),
+        client.bulk.jobs(),
+      ]);
+      const urls = urlsOf(fetch);
+      expect(urls).toHaveLength(4);
+      expect(urls.filter((url) => url.endsWith("/auth/v2/token"))).toHaveLength(1);
     });
-    expect(urlOf(fetch).href).toBe(`${HOST}/v1/autocomplete`);
-    expect(headersOf(fetch)).toMatchObject({
-      authorization: APIKEY,
-      "x-transaction-id": session,
+
+    it("is renewed shortly before it expires", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const start = Date.now();
+      const fetch = fakeFetch(
+        TOKEN,
+        { body: geocodeFixture },
+        { body: geocodeFixture },
+        { body: { ...tokenFixture, access_token: "second" } },
+        { body: geocodeFixture },
+      );
+      const client = onVendor(fetch);
+      await client.geocode({ addresses: [address] });
+      // The token lasts 1800 seconds and is given up a minute early.
+      vi.setSystemTime(start + 1739_000);
+      await client.geocode({ addresses: [address] });
+      vi.setSystemTime(start + 1741_000);
+      await client.geocode({ addresses: [address] });
+      expect(urlsOf(fetch).map((url) => url.slice(HOST.length))).toEqual([
+        "/auth/v2/token",
+        "/v1/geocode",
+        "/v1/geocode",
+        "/auth/v2/token",
+        "/v1/geocode",
+      ]);
+      expect(headersOf(fetch, 2)["authorization"]).toBe(BEARER);
+      expect(headersOf(fetch, 4)["authorization"]).toBe("Bearer second");
     });
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { maxResults: 2, returnAllInfo: true, originXY: [-89.7, 44.3] },
-      address: { addressLines: ["615 Wrenlow"], country: "US" },
+
+    it("is replaced once when Precisely answers 401, and the call is sent again", async () => {
+      const fetch = fakeFetch(
+        TOKEN,
+        { status: 401, body: unauthorizedFixture },
+        { body: { ...tokenFixture, access_token: "second" } },
+        { body: geocodeFixture },
+      );
+      const client = onVendor(fetch);
+      expect(await client.geocode({ addresses: [address] })).toEqual(geocodeFixture);
+      expect(urlsOf(fetch).map((url) => url.slice(HOST.length))).toEqual([
+        "/auth/v2/token",
+        "/v1/geocode",
+        "/auth/v2/token",
+        "/v1/geocode",
+      ]);
+      expect(headersOf(fetch, 1)["authorization"]).toBe(BEARER);
+      expect(headersOf(fetch, 3)["authorization"]).toBe("Bearer second");
+      // The fresh token is the one kept.
+      await client.bulk.files();
+      expect(headersOf(fetch, 4)["authorization"]).toBe("Bearer second");
     });
-    expect(answer.results).toHaveLength(2);
-    expect(answer.results[0]).toEqual({
-      id: "PB_KEY:P0000M3XD71H:USA",
-      type: "unknown",
-      name: "615 Wrenlow Ave",
-      label: "615 Wrenlow Ave, Tannery Fold WI 54193",
-      location: { lat: 44.318639999999995, lon: -89.73128 },
-      accuracy: null,
-      confidence: null,
-      distance: 3240,
-      address: {
-        houseNumber: "615",
-        street: "Wrenlow Ave",
-        unit: null,
-        neighbourhood: null,
-        locality: "Tannery Fold",
-        district: null,
-        region: "WI",
-        regionCode: "WI",
-        postcode: "54193",
-        country: null,
-        countryCode: "US",
-      },
-      // `WRENLOW` is what was typed, but the label spells it `Wrenlow`, so only `615` can be placed.
-      highlights: [{ start: 0, end: 3 }],
-      match: {
-        score: null,
-        label: null,
-        components: {
-          houseNumber: "matched",
-          region: "unmatched",
-          district: "unmatched",
-          locality: "unmatched",
-          street: "partial",
-          postcode: "unmatched",
-        },
-      },
-      addressLines: ["615 Wrenlow Ave", "Tannery Fold WI 54193"],
+
+    it("is not replaced a second time for the same call", async () => {
+      const fetch = fakeFetch(TOKEN, { status: 401, body: unauthorizedFixture }, TOKEN, {
+        status: 401,
+        body: unauthorizedFixture,
+        headers: { "x-request-id": "req-401" },
+      });
+      const error = await caught(onVendor(fetch).geocode({ addresses: [address] }));
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(error).toMatchObject({
+        code: "unauthenticated",
+        status: 401,
+        provider: "precisely",
+        operation: "geocode",
+        requestId: "req-401",
+      });
+      expect(error.cause).toBeInstanceOf(AuthenticationError);
     });
-    expect(answer.results[1]!.id).toBe("PB_KEY:P00009RVK4TB:USA");
-    expect(answer.unavailable).toEqual(["confidence"]);
-    expect(answer.ignored).toEqual([]);
-  });
 
-  it("asks for five suggestions by default, and leaves out a distance with no origin", async () => {
-    const fetch = fakeFetch({ body: autocompleteFixture });
-    const answer = await geocoder(fetch, { defaultCountry: "USA" }).autocomplete("615 Wrenlow");
-    expect(bodyOf(fetch).preferences).toEqual({ maxResults: 5, returnAllInfo: true });
-    expect(answer.results.map((place) => place.distance)).toEqual([null, null]);
-  });
-
-  it("converts the distance to metres", async () => {
-    const body = structuredClone(autocompleteFixture);
-    body.response.predictions[0]!.distance = { value: 3, distanceUnit: "MILE" };
-    body.response.predictions[1]!.distance = { value: 40, distanceUnit: "FOOT" };
-    const answer = await geocoder(fakeFetch({ body })).autocomplete("615 Wrenlow", {
-      countries: ["US"],
-      focus: { lat: 44.3, lon: -89.7 },
+    it("fails the call when the key or secret is refused", async () => {
+      const fetch = fakeFetch({ status: 400, body: tokenErrorFixture });
+      const error = await caught(onVendor(fetch).geocode({ addresses: [address] }));
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // Precisely answers 400 here, and its own code says the credentials are the problem.
+      expect(error).toMatchObject({
+        code: "unauthenticated",
+        status: 400,
+        provider: "precisely",
+        operation: "geocode",
+        message: tokenErrorFixture.error_description,
+        body: tokenErrorFixture,
+      });
+      expect(error.cause).toBeInstanceOf(BadRequestError);
     });
-    expect(answer.results.map((place) => place.distance)).toEqual([4828.032, 12.192]);
-  });
 
-  it("does not send a session that is not a UUID", async () => {
-    const fetch = fakeFetch({ body: autocompleteFixture });
-    await geocoder(fetch).autocomplete("615", { countries: ["US"], session: "keystrokes-1" });
-    expect(headersOf(fetch)).not.toHaveProperty("x-transaction-id");
-  });
-
-  it("turns a failed status in the body into an error", async () => {
-    const response = {
-      status: "INVALID_REQUEST",
-      errorMessage: "The request could not be read (DIS-LI-1018)",
-    };
-    const error = await caught(
-      geocoder(fakeFetch({ body: { response } })).autocomplete("x", { countries: ["US"] }),
-    );
-    expect(error.code).toBe("invalid_request");
-    expect(error.message).toBe("The request could not be read (DIS-LI-1018)");
-    expect(error.cause).toBeInstanceOf(BadRequestError);
-  });
-});
-
-describe("lookup", () => {
-  it("decodes the ID into a key, its type and its country", async () => {
-    const fetch = fakeFetch({ body: lookupFixture });
-    const answer = await geocoder(fetch).lookup("PB_KEY:P0000W5HN83C:US", { include: ["raw"] });
-    expect(urlOf(fetch).href).toBe(`${HOST}/v1/lookup`);
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { returnAllInfo: true },
-      keys: [{ key: "P0000W5HN83C", type: "PB_KEY", country: "US" }],
+    it("fails the call when the token answer holds no token", async () => {
+      const fetch = fakeFetch({ body: { token_type: "Bearer" } });
+      const error = await caught(onVendor(fetch).geocode({ addresses: [address] }));
+      expect(error).toMatchObject({ code: "provider_error", provider: "precisely" });
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
-    expect(answer.results).toEqual([
-      { ...quillfield, raw: lookupFixture.responses[0]!.results[0] },
-    ]);
-    expect(answer.raw).toEqual(lookupFixture);
-    expect(answer.unavailable).toEqual(["confidence", "distance"]);
-  });
 
-  it("takes back the ID an earlier result carried", async () => {
-    const fetch = fakeFetch({ body: autocompleteFixture }, { body: lookupFixture });
-    const geo = geocoder(fetch);
-    const suggested = await geo.autocomplete("615 Wrenlow", { countries: ["US"] });
-    await geo.lookup(suggested.results[0]!.id!);
-    expect(bodyOf(fetch, 1).keys).toEqual([
-      { key: "P0000M3XD71H", type: "PB_KEY", country: "USA" },
-    ]);
-  });
-
-  it("uses the default country for an ID that names none", async () => {
-    const fetch = fakeFetch({ body: lookupFixture });
-    await geocoder(fetch, { defaultCountry: "AUS" }).lookup(["GNAF_PID:GANSW706284915", "nope"]);
-    expect(bodyOf(fetch).keys).toEqual([
-      { key: "GANSW706284915", type: "GNAF_PID", country: "AUS" },
-    ]);
-    const error = await caught(geocoder(fetch).lookup("GNAF_PID:GANSW706284915"));
-    expect(error.code).toBe("invalid_request");
-    expect(error.message).toMatch(/^Precisely needs a country\./);
-  });
-
-  it("answers nothing for an unknown ID", async () => {
-    const fetch = fakeFetch({ body: { responses: [{ status: "ZERO_RESULTS" }] } });
-    const geo = geocoder(fetch);
-    expect((await geo.lookup("not-a-precisely-id")).results).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-    expect((await geo.lookup("PB_KEY:P000000000000:US")).results).toEqual([]);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("sets a null ID on a result with no lookup key", async () => {
-    const body = structuredClone(geocodeFixture);
-    delete (body.responses[0]!.results[0]!.customFields as { PB_KEY?: string }).PB_KEY;
-    const answer = await geocoder(fakeFetch({ body })).geocode("x", { countries: ["US"] });
-    expect(answer.results[0]!.id).toBeNull();
-  });
-});
-
-describe("errors", () => {
-  it.each([
-    [400, badRequestFixture, "invalid_request", "The country QQQ is not recognised (DIS-LI-1016)"],
-    [401, unauthorizedFixture, "unauthenticated", "The credentials were not accepted (DIS-1001)"],
-    [403, forbiddenFixture, "permission_denied", "This account may not call this API (DIS-1002)"],
-    [
-      413,
-      tooLargeFixture,
-      "payload_too_large",
-      "A request may carry at most 25 items (DIS-LI-1014)",
-    ],
-    [429, rateLimitFixture, "rate_limited", "Too many requests in the current window (DIS-1005)"],
-    [
-      500,
-      internalFixture,
-      "provider_error",
-      "An internal service failed. Try again later (DIS-1003)",
-    ],
-    [
-      503,
-      unavailableFixture,
-      "unavailable",
-      "The service is not available at the moment (DIS-LI-1011)",
-    ],
-  ] as const)("maps HTTP %i to a GeocoderError", async (status, body, code, message) => {
-    const fetch = fakeFetch({ status, body, headers: { "x-request-id": "req-9" } });
-    const error = await caught(geocoder(fetch).geocode("x", { countries: ["US"], maxRetries: 0 }));
-    expect(error.code).toBe(code);
-    expect(error.message).toBe(message);
-    expect(error.provider).toBe("precisely");
-    expect(error.operation).toBe("geocode");
-    expect(error.status).toBe(status);
-    expect(error.requestId).toBe("req-9");
-    expect(error.cause).toBeInstanceOf(OgError);
-    expect((error.cause as OgError).body).toEqual(body);
-  });
-
-  it("reads the status word where the HTTP status misleads", async () => {
-    const wrong = await caught(
-      geocoder(fakeFetch({ status: 400, body: unauthorizedFixture })).geocode("x", {
-        countries: ["US"],
-      }),
-    );
-    expect(wrong.code).toBe("unauthenticated");
-    const quota = {
-      errors: [
-        {
-          status: "FORBIDDEN",
-          errorMessage: "The trial quota is used up and no more requests are accepted (DIS-1007)",
-        },
-      ],
-    };
-    const spent = await caught(
-      geocoder(fakeFetch({ status: 403, body: quota })).geocode("x", { countries: ["US"] }),
-    );
-    expect(spent.code).toBe("rate_limited");
-  });
-
-  it("fails a single geocode whose item failed in a 206", async () => {
-    const [failed] = partialFixture.responses;
-    const error = await caught(
-      geocoder(fakeFetch({ status: 206, body: { responses: [failed] } })).geocode("x", {
-        countries: ["US"],
-      }),
-    );
-    expect(error.code).toBe("invalid_request");
-    expect(error.message).toBe("The country QQQ is not recognised (DIS-LI-1016)");
-    expect(error.cause).toBeInstanceOf(BadRequestError);
-    expect((error.cause as OgError).body).toEqual(failed);
-  });
-});
-
-describe("batch", () => {
-  it("runs geocodes through the realtime endpoint and keeps a failed item apart", async () => {
-    const fetch = fakeFetch({ status: 206, body: partialFixture });
-    const progress: { done: number; total: number }[] = [];
-    const geo = geocoder(fetch);
-    expect(geo.capabilities.batch).toEqual({ geocode: "native", reverse: "native" });
-    const answer = await geo.batch.geocode(
-      [
-        "an address with no country",
-        { address: { address: "1 Nowhere St", country: "QQQ" } },
-        {
-          id: "b",
-          address: { address: "4820 Kestrel Blvd #210", locality: "Harrowmere", country: "USA" },
-        },
-      ],
-      { limit: 1, onProgress: (step) => progress.push(step) },
-    );
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(urlOf(fetch).href).toBe(`${HOST}/v1/geocode`);
-    expect(bodyOf(fetch)).toEqual({
-      preferences: { maxResults: 1, returnAllInfo: true },
-      addresses: [
-        { addressId: "1", addressLines: ["1 Nowhere St"], country: "QQQ" },
-        {
-          addressId: "2",
-          addressLines: ["4820 Kestrel Blvd #210"],
-          city: "Harrowmere",
-          country: "USA",
-        },
-      ],
+    it("is asked for again after a failed exchange", async () => {
+      const fetch = fakeFetch({ status: 400, body: tokenErrorFixture }, TOKEN, {
+        body: geocodeFixture,
+      });
+      const client = onVendor(fetch);
+      await caught(client.geocode({ addresses: [address] }));
+      expect(await client.geocode({ addresses: [address] })).toEqual(geocodeFixture);
+      expect(fetch).toHaveBeenCalledTimes(3);
     });
-    expect(answer).toMatchObject({
-      provider: "precisely",
-      operation: "batch.geocode",
-      mode: "native",
-      summary: { total: 3, succeeded: 1, failed: 2 },
-      unavailable: ["confidence", "distance"],
-      ignored: [],
+
+    it("lets a caller give up while the exchange is still under way", async () => {
+      const fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as Fetch;
+      const controller = new AbortController();
+      const call = caught(
+        onVendor(fetch).geocode({ addresses: [address] }, { signal: controller.signal }),
+      );
+      controller.abort();
+      expect(await call).toMatchObject({ code: "aborted", operation: "geocode" });
     });
-    const [missing, failed, found] = answer.items;
-    expect(missing!.error!.code).toBe("invalid_request");
-    expect(missing!.error!.message).toMatch(/^Precisely needs a country\./);
-    expect(failed).toMatchObject({ index: 1, id: null, results: [] });
-    expect(failed!.error!.code).toBe("invalid_request");
-    expect(failed!.error!.message).toBe("The country QQQ is not recognised (DIS-LI-1016)");
-    expect(failed!.error!.cause).toBeInstanceOf(BadRequestError);
-    expect((failed!.error!.cause as OgError).body).toEqual(partialFixture.responses[0]);
-    expect(found).toEqual({ index: 2, id: "b", results: [harrowmere], error: null });
-    expect(progress).toEqual([
-      { done: 1, total: 3 },
-      { done: 3, total: 3 },
-    ]);
+
+    it("is never asked for when og answers", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture });
+      const client = onOg(fetch);
+      await client.geocode({ addresses: [address] });
+      await client.bulk.files();
+      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/v1/geocode`, `${OG_ROOT}/v2/files`]);
+    });
   });
 
-  it("splits reverse points into requests of 25, and fails only the chunk that failed", async () => {
-    const sizes: number[] = [];
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const { locations } = JSON.parse(String(init!.body)) as {
-        locations: { addressId: string; country: string }[];
-      };
-      sizes.push(locations.length);
-      if (locations.length < 25) return Response.json(internalFixture, { status: 500 });
-      return Response.json({
-        responses: locations.map(({ addressId }) =>
-          addressId === "3"
-            ? { addressId, status: "OK", results: reverseFixture.responses[0]!.results }
-            : { addressId, status: "ZERO_RESULTS" },
-        ),
+  describe("a region", () => {
+    it("answers the real-time calls, while the token and the bulk calls stay on the default host", async () => {
+      const fetch = fakeFetch(TOKEN, { body: geocodeFixture });
+      const client = onVendor(fetch, { region: "eu1" });
+      await client.geocode({ addresses: [address] });
+      await client.autocomplete({ address });
+      await client.bulk.files();
+      expect(urlsOf(fetch)).toEqual([
+        `${HOST}/auth/v2/token`,
+        "https://api.eu1.cloud.precisely.com/v1/geocode",
+        "https://api.eu1.cloud.precisely.com/v1/autocomplete",
+        `${HOST}/v2/files`,
+      ]);
+    });
+
+    it("means nothing to og", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture });
+      await onOg(fetch, { region: "eu1" }).geocode({ addresses: [address] });
+      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/v1/geocode`]);
+    });
+  });
+
+  describe("bulk.upload", () => {
+    const csv = "addressId|address|country\n1|4820 Kestrel Blvd|USA\n";
+
+    it("sends the file to the signed URL with no token and none of the client's headers", async () => {
+      const fetch = fakeFetch({ body: "" });
+      const client = onVendor(fetch, { headers: { "x-gateway": "g" } });
+      const outcome = await client.bulk
+        .upload({ url: uploadUrlFixture.url, content: csv })
+        .withResponse();
+      expect(urlsOf(fetch)).toEqual([uploadUrlFixture.url]);
+      expect(methodOf(fetch)).toBe("PUT");
+      expect(rawBodyOf(fetch)).toBe(csv);
+      const headers = headersOf(fetch);
+      expect(headers["content-type"]).toBe("text/csv");
+      expect(headers["authorization"]).toBeUndefined();
+      expect(headers["x-gateway"]).toBeUndefined();
+      expect(outcome.data).toBeUndefined();
+      expect(outcome.cache).toEqual({ maxTtl: 0 });
+    });
+
+    it("sends the content type asked for", async () => {
+      const fetch = fakeFetch({ body: "" });
+      await onVendor(fetch).bulk.upload({
+        url: uploadUrlFixture.url,
+        content: new Blob([csv]),
+        contentType: "text/plain",
+      });
+      expect(headersOf(fetch)["content-type"]).toBe("text/plain");
+      expect(rawBodyOf(fetch)).toBeInstanceOf(Blob);
+    });
+
+    it("sends the file to og's own URL the way every request to og goes", async () => {
+      const url = `${OG_ROOT}/v2/files/${FILE_ID}/content`;
+      const fetch = fakeFetch({ body: "" });
+      await onOg(fetch, { headers: { "x-gateway": "g" } }).bulk.upload({ url, content: csv });
+      expect(urlsOf(fetch)).toEqual([url]);
+      expect(methodOf(fetch)).toBe("PUT");
+      expect(headersOf(fetch)).toMatchObject({ "content-type": "text/csv", "x-gateway": "g" });
+      expect(headersOf(fetch)["authorization"]).toBeUndefined();
+    });
+
+    it("is sent once, since a repeat is not known to be safe", async () => {
+      const fetch = fakeFetch({
+        status: 503,
+        body: "",
+        headers: { "x-amz-request-id": "store-1" },
+      });
+      const error = await caught(
+        onVendor(fetch).bulk.upload({ url: uploadUrlFixture.url, content: csv }),
+      );
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(error).toMatchObject({
+        code: "unavailable",
+        status: 503,
+        provider: "precisely",
+        operation: "bulk.upload",
+        requestId: "store-1",
       });
     });
-    const points = Array.from({ length: 30 }, (_, index) => ({ lat: 39 + index / 100, lon: -105 }));
-    const answer = await geocoder(fetch).batch.reverse(points, {
-      countries: ["US"],
-      concurrency: 1,
-      maxRetries: 0,
-    });
-    expect(sizes).toEqual([25, 5]);
-    expect(JSON.parse(String(fetch.mock.calls[1]![1]!.body)).locations[0]).toEqual({
-      addressId: "25",
-      longitude: -105,
-      latitude: 39.25,
-      country: "US",
-    });
-    expect(answer.summary).toEqual({ total: 30, succeeded: 25, failed: 5 });
-    expect(answer.items[3]!.results).toEqual([{ ...quillfield, distance: 36.981300000000005 }]);
-    expect(answer.items[4]).toEqual({ index: 4, id: null, results: [], error: null });
-    expect(answer.items[29]!.error!.code).toBe("provider_error");
-  });
-});
-
-describe("native", () => {
-  it("sends any request with the credentials", async () => {
-    const fetch = fakeFetch({ body: verifyFixture });
-    const { native } = geocoder(fetch, { headers: { "x-gateway": "g" } });
-    const body = { addresses: [{ addressLines: ["4820 Kestrel Blvd"], country: "USA" }] };
-    expect(await native.request({ path: "/v1/verify", body })).toEqual(verifyFixture);
-    expect(await native.verify(body)).toEqual(verifyFixture);
-    for (const call of [0, 1]) {
-      expect(urlOf(fetch, call).href).toBe(`${HOST}/v1/verify`);
-      expect(initOf(fetch, call).method).toBe("POST");
-      expect(headersOf(fetch, call)).toMatchObject({ authorization: APIKEY, "x-gateway": "g" });
-      expect(bodyOf(fetch, call)).toEqual(body);
-    }
   });
 
-  it("trades the key and secret for a token", async () => {
-    const fetch = fakeFetch({ body: tokenFixture });
-    const token = await adapter(fetch, { authBaseUrl: "https://auth.test/" }).native.token();
-    expect(token).toEqual(tokenFixture);
-    expect(urlOf(fetch).href).toBe("https://auth.test/auth/v2/token");
-    expect(initOf(fetch).method).toBe("POST");
-    expect(initOf(fetch).body).toBe("grant_type=client_credentials&scope=default");
-    expect(headersOf(fetch)).toMatchObject({
-      authorization: "Basic a2V5OnNlY3JldA==",
-      "content-type": "application/x-www-form-urlencoded",
+  describe("bulk.results", () => {
+    const csv = "addressId,status\n1,OK\n";
+
+    it("reads the output file from the signed URL as text, with no token", async () => {
+      const fetch = fakeFetch({ body: csv, headers: { "content-type": "text/csv" } });
+      const client = onVendor(fetch, { headers: { "x-gateway": "g" } });
+      const outcome = await client.bulk
+        .results({ downloadUrl: jobStatusFixture.downloadUrl })
+        .withResponse();
+      expect(urlsOf(fetch)).toEqual([jobStatusFixture.downloadUrl]);
+      expect(methodOf(fetch)).toBe("GET");
+      expect(headersOf(fetch)).toEqual({ accept: "text/csv" });
+      expect(outcome.data).toBe(csv);
+      expect(outcome.cache).toEqual({ maxTtl: 0 });
+    });
+
+    it("reads the output file from og's own URL", async () => {
+      const downloadUrl = `${OG_ROOT}/v2/bulk/jobs/abc/output`;
+      const fetch = fakeFetch({ body: csv, headers: { "content-type": "text/csv" } });
+      expect(await onOg(fetch).bulk.results({ downloadUrl })).toBe(csv);
+      expect(urlsOf(fetch)).toEqual([downloadUrl]);
+      expect(headersOf(fetch)["authorization"]).toBeUndefined();
     });
   });
 
-  it("reports a token error in Precisely's words", async () => {
-    const fetch = fakeFetch({ status: 400, body: tokenErrorFixture });
-    const error = await caught<OgError>(adapter(fetch).native.token());
-    expect(error).toBeInstanceOf(BadRequestError);
-    expect(error.message).toBe("The key and secret are missing (DIS-AUTH-1020)");
-    expect(() => precisely({ token: "jwt", fetch }).native.token()).toThrow(OgError);
+  describe("headers", () => {
+    it("sends the client's headers and the call's headers to og and to Precisely", async () => {
+      const options = { headers: { "x-gateway": "g" } };
+      const toVendor = fakeFetch(TOKEN, { body: geocodeFixture });
+      const toOg = fakeFetch({ body: geocodeFixture });
+      const call = { headers: { "x-call": "c" } };
+      await onVendor(toVendor, options).geocode({ addresses: [address] }, call);
+      await onOg(toOg, options).geocode({ addresses: [address] }, call);
+      expect(headersOf(toVendor, 1)).toMatchObject({ "x-gateway": "g", "x-call": "c" });
+      expect(headersOf(toOg, 0)).toMatchObject({ "x-gateway": "g", "x-call": "c" });
+    });
+
+    it("leaves a header field that is not set out of the request", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture });
+      await onOg(fetch).geocode({ "X-Request-Id": undefined, addresses: [address] });
+      expect(headersOf(fetch)).toEqual({
+        accept: "application/json",
+        "content-type": "application/json",
+      });
+      expect(bodyOf(fetch)).toEqual({ addresses: [address] });
+    });
   });
 
-  it("runs the bulk file flow", async () => {
-    const fetch = fakeFetch(
-      { body: uploadUrlFixture },
-      { body: "" },
-      { status: 202, body: submitFixture },
-      { status: 202, body: submitFixture },
-      { body: jobStatusFixture },
-      { body: cancelFixture },
-      { body: jobsFixture },
-      { body: filesFixture },
-      { body: deleteFileFixture },
+  describe("retries", () => {
+    const busy: Reply = {
+      status: 503,
+      body: unavailableFixture,
+      headers: { "retry-after-ms": "1" },
+    };
+
+    it("repeats a lookup that failed for now", async () => {
+      const fetch = fakeFetch(busy, { body: geocodeFixture });
+      expect(await onOg(fetch).geocode({ addresses: [address] })).toEqual(geocodeFixture);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["autocomplete", "expressAutocomplete", "expressAutocompleteV2"] as const)(
+      "sends %s once, since a retried keystroke is already stale",
+      async (method) => {
+        const fetch = fakeFetch(busy, { body: autocompleteFixture });
+        const error = await caught(onOg(fetch)[method]({ address }));
+        expect(error).toMatchObject({ code: "unavailable", operation: method });
+        expect(fetch).toHaveBeenCalledTimes(1);
+      },
     );
-    const { bulk } = adapter(fetch, {
-      bulkBaseUrl: "https://bulk.test",
-      headers: { "x-gateway": "g" },
-    }).native;
-    const file = await bulk.uploadUrl("harbour_batch");
-    expect(file).toEqual(uploadUrlFixture);
-    await bulk.upload(file.url, "addressId|address|country\n1|12 Tannery Row Harrowmere|GBR\n");
-    const preferences = { maxResults: 1 };
-    const job = await bulk.geocode({ fileId: file.fileId, delimiter: "|", preferences });
-    expect(job).toEqual(submitFixture);
-    await bulk.verify({ fileId: file.fileId }, { cassFlow: "no_report" });
-    expect(await bulk.status(job.statusUrl)).toEqual(jobStatusFixture);
-    expect(await bulk.cancel("c15a8f72-6b3e-4d09-91f4-2e7d0a6b38c5")).toEqual(cancelFixture);
-    expect(await bulk.jobs("running")).toEqual(jobsFixture);
-    expect(await bulk.files()).toEqual(filesFixture);
-    expect(await bulk.deleteFile(file.fileId)).toEqual(deleteFileFixture);
 
-    const sent = fetch.mock.calls.map(([url, init]) => `${init!.method} ${String(url)}`);
-    expect(sent).toEqual([
-      "POST https://bulk.test/v2/files/upload-url",
-      `PUT ${uploadUrlFixture.url}`,
-      "POST https://bulk.test/v2/bulk-geocode",
-      "POST https://bulk.test/v2/bulk-verify",
-      "GET https://bulk.test/v2/bulk/jobs/7e2b94c1-05da-4f36-8a17-c3d6f0b952e8",
-      "DELETE https://bulk.test/v2/bulk/jobs/c15a8f72-6b3e-4d09-91f4-2e7d0a6b38c5",
-      "GET https://bulk.test/v2/bulk/jobs?status=running",
-      "GET https://bulk.test/v2/files",
-      `DELETE https://bulk.test/v2/files/${uploadUrlFixture.fileId}`,
-    ]);
-    expect(bodyOf(fetch, 0)).toEqual({ fileName: "harbour_batch" });
-    expect(headersOf(fetch, 0)).toMatchObject({ authorization: APIKEY, "x-gateway": "g" });
-    // The storage host gets the file and its content type, and no Precisely credentials.
-    expect(initOf(fetch, 1).body).toBe(
-      "addressId|address|country\n1|12 Tannery Row Harrowmere|GBR\n",
+    it("repeats a type-ahead call when the caller asks for it", async () => {
+      const fetch = fakeFetch(busy, { body: autocompleteFixture });
+      expect(await onOg(fetch).autocomplete({ address }, { maxRetries: 1 })).toEqual(
+        autocompleteFixture,
+      );
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["geocode", "verify"] as const)(
+      "never repeats bulk.%s, since that would start a second job",
+      async (method) => {
+        const fetch = fakeFetch(busy, { status: 202, body: submitFixture });
+        const error = await caught(
+          onOg(fetch).bulk[method]({ fileId: FILE_ID }, { maxRetries: 3 }),
+        );
+        expect(error).toMatchObject({ code: "unavailable", operation: `bulk.${method}` });
+        expect(fetch).toHaveBeenCalledTimes(1);
+      },
     );
-    expect(headersOf(fetch, 1)).toEqual({ accept: "application/json", "content-type": "text/csv" });
-    expect(bodyOf(fetch, 2)).toEqual({ fileId: file.fileId, delimiter: "|", preferences });
-    expect(headersOf(fetch, 3)).toMatchObject({
-      authorization: APIKEY,
-      "x-cass-flow": "no_report",
+
+    it("never repeats bulk.uploadUrl, since each call makes a new file", async () => {
+      const fetch = fakeFetch(busy, { body: uploadUrlFixture });
+      await caught(onOg(fetch).bulk.uploadUrl({ fileName: "f" }));
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
   });
 
-  it("throws the typed error of a failed bulk call", async () => {
-    const fetch = fakeFetch({ status: 400, body: cancelErrorFixture });
-    const error = await caught<OgError>(adapter(fetch).native.bulk.cancel("nope"));
-    expect(error).toBeInstanceOf(BadRequestError);
-    expect(error.message).toBe("The job ID is not valid (DIS-LI-1051)");
-    expect(error).not.toBeInstanceOf(AuthenticationError);
-  });
-});
+  describe("answers", () => {
+    it("hands back a partly failed batch, sent with 206, as it is", async () => {
+      const fetch = fakeFetch({ status: 206, body: partialFixture });
+      const outcome = await onOg(fetch)
+        .geocode({
+          addresses: [
+            { addressId: "1", country: "QQQ" },
+            { addressId: "2", ...address },
+          ],
+        })
+        .withResponse();
+      expect(outcome.response?.status).toBe(206);
+      expect(outcome.data).toEqual(partialFixture);
+      expect(outcome.data.responses.map((item) => item.status)).toEqual(["INVALID_REQUEST", "OK"]);
+    });
 
-const key = process.env.PRECISELY_API_KEY;
-const secret = process.env.PRECISELY_API_SECRET;
-
-const live = () =>
-  new Geocoder({
-    adapter: precisely({ apiKey: key!, apiSecret: secret!, defaultCountry: "USA" }),
-  });
-const shaped = (place: { name: string; label: string; address: object } | undefined) => {
-  expect(place).toBeDefined();
-  expect(typeof place!.name).toBe("string");
-  expect(typeof place!.label).toBe("string");
-  expect(Object.keys(place!.address)).toHaveLength(11);
-};
-
-it("lets a cache keep none of Precisely's answers until its terms are checked", () => {
-  const geo = geocoder(fakeFetch({ body: {} }));
-  expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
-});
-
-describe.skipIf(!key || !secret)("live", () => {
-  it("geocodes", async () => {
-    const answer = await live().geocode("4820 Kestrel Blvd #210 Harrowmere, OH");
-    expect(answer.provider).toBe("precisely");
-    shaped(answer.results[0]);
-    expect(answer.results[0]!.location).toEqual({
-      lat: expect.any(Number),
-      lon: expect.any(Number),
+    it("carries the request ID of the answer", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture, headers: { "x-request-id": "req-7" } });
+      const outcome = await onOg(fetch)
+        .geocode({ addresses: [address] })
+        .withResponse();
+      expect(outcome.requestId).toBe("req-7");
     });
   });
 
-  it("reverse geocodes", async () => {
-    const answer = await live().reverse({ lat: 39.52688, lon: -105.31854 });
-    shaped(answer.results[0]);
+  describe("how long an answer may be kept", () => {
+    it("is 30 days for a lookup Precisely answered", async () => {
+      const fetch = fakeFetch(TOKEN, { body: geocodeFixture });
+      const client = onVendor(fetch);
+      for (const call of [
+        client.geocode({ addresses: [address] }),
+        client.reverseGeocode({ locations: [{ longitude: 1, latitude: 2, country: "USA" }] }),
+        client.lookup({ keys: [{ key: "k", type: "PB_KEY", country: "USA" }] }),
+        client.verify({ addresses: [address] }),
+        client.autocomplete({ address }),
+      ]) {
+        const outcome = await call.withResponse();
+        expect(outcome.cache).toEqual({ maxTtl: 30 * DAY });
+        expect(outcome.server).toBe("precisely");
+      }
+    });
+
+    it("is never for a job's state or a file Precisely answered", async () => {
+      const fetch = fakeFetch(TOKEN, { body: jobStatusFixture });
+      const client = onVendor(fetch);
+      for (const call of [
+        client.bulk.status({ jobId: JOB_ID }),
+        client.bulk.jobs(),
+        client.bulk.files(),
+        client.bulk.uploadUrl({ fileName: "f" }),
+        client.bulk.geocode({ fileId: FILE_ID }),
+      ])
+        expect((await call.withResponse()).cache).toEqual({ maxTtl: 0 });
+    });
+
+    it("has no limit when og answered", async () => {
+      const fetch = fakeFetch({ body: geocodeFixture });
+      const outcome = await onOg(fetch)
+        .geocode({ addresses: [address] })
+        .withResponse();
+      expect(outcome).toMatchObject({ server: "og", cache: { maxTtl: Infinity } });
+    });
   });
 
-  it("suggests, and looks a suggestion up", async () => {
-    const geo = live();
-    const session = crypto.randomUUID();
-    const suggested = await geo.autocomplete("615 Wrenlow", { limit: 2, session });
-    shaped(suggested.results[0]);
-    const id = suggested.results.find((place) => place.id !== null)?.id;
-    if (id) shaped((await geo.lookup(id)).results[0]);
+  describe("errors", () => {
+    const failures: [number, unknown, GeocoderErrorCode][] = [
+      [400, badRequestFixture, "invalid_request"],
+      [401, unauthorizedFixture, "unauthenticated"],
+      [403, forbiddenFixture, "permission_denied"],
+      [413, tooLargeFixture, "payload_too_large"],
+      [429, rateLimitFixture, "rate_limited"],
+      [500, internalFixture, "provider_error"],
+      [503, unavailableFixture, "unavailable"],
+      [
+        501,
+        { errors: [{ status: "NOT_IMPLEMENTED", errorMessage: "This API is not implemented" }] },
+        "unsupported",
+      ],
+      [404, { errors: [{ status: "NOT_FOUND", errorMessage: "No such resource" }] }, "not_found"],
+    ];
+
+    it.each(failures)("reads a %i from og", async (status, body, code) => {
+      const fetch = fakeFetch({ status, body, headers: { "x-request-id": "req-9" } });
+      const error = await caught(
+        onOg(fetch, { maxRetries: 0 }).reverseGeocode({
+          locations: [{ longitude: 1, latitude: 2, country: "USA" }],
+        }),
+      );
+      const message = (body as { errors: { errorMessage: string }[] }).errors[0]!.errorMessage;
+      expect(error).toBeInstanceOf(GeocoderError);
+      expect(error).toMatchObject({
+        code,
+        status,
+        provider: "og",
+        operation: "reverseGeocode",
+        requestId: "req-9",
+        message,
+        body,
+      });
+      expect(error.cause).toBeInstanceOf(OgError);
+      expect(error.cause).toMatchObject({ status, body, provider: "og", requestId: "req-9" });
+      expect((error.cause as OgError).headers?.get("x-request-id")).toBe("req-9");
+    });
+
+    it("reads an error Precisely answered", async () => {
+      const fetch = fakeFetch(TOKEN, {
+        status: 400,
+        body: cancelErrorFixture,
+        headers: { "x-request-id": "req-3" },
+      });
+      const error = await caught(onVendor(fetch).bulk.cancel({ jobId: "nope" }));
+      expect(error).toMatchObject({
+        code: "invalid_request",
+        status: 400,
+        provider: "precisely",
+        operation: "bulk.cancel",
+        requestId: "req-3",
+        message: cancelErrorFixture.errors[0]!.errorMessage,
+      });
+      expect(error.cause).toBeInstanceOf(BadRequestError);
+      expect(error.cause).toMatchObject({ body: cancelErrorFixture, provider: "precisely" });
+    });
+
+    it("joins the messages of an error with several entries", async () => {
+      const body = {
+        errors: [
+          { status: "INVALID_REQUEST", errorMessage: "First (DIS-LI-1015)" },
+          { status: "INVALID_REQUEST", errorMessage: "Second (DIS-LI-1016)" },
+        ],
+      };
+      const error = await caught(
+        onOg(fakeFetch({ status: 400, body })).geocode({ addresses: [address] }),
+      );
+      expect(error.message).toBe("First (DIS-LI-1015) Second (DIS-LI-1016)");
+    });
+
+    it.each<[string, number, unknown, GeocoderErrorCode]>([
+      [
+        "a wrong key or secret sent with 400",
+        400,
+        { errors: [{ status: "INVALID_REQUEST", errorMessage: "Bad key or secret (DIS-1006)" }] },
+        "unauthenticated",
+      ],
+      [
+        "a used-up quota sent with 403",
+        403,
+        { errors: [{ status: "FORBIDDEN", errorMessage: "The quota is used up (DIS-1007)" }] },
+        "rate_limited",
+      ],
+      [
+        "an expired workspace sent with 400",
+        400,
+        { errors: [{ status: "INVALID_REQUEST", errorMessage: "Workspace expired (DIS-1010)" }] },
+        "permission_denied",
+      ],
+      [
+        "a lookup that ran out of time",
+        503,
+        { errors: [{ status: "REQUEST_TIMEOUT", errorMessage: "Try again (DIS-LI-1011)" }] },
+        "timeout",
+      ],
+      [
+        "an OAuth error that says the caller may not",
+        400,
+        { error: "access_denied", error_description: "The key may not do this" },
+        "permission_denied",
+      ],
+      ["a body that is not Precisely's", 418, "short and stout", "invalid_request"],
+    ])("reads %s by what the body says", async (_name, status, body, code) => {
+      const fetch = fakeFetch({ status, body });
+      const error = await caught(onOg(fetch, { maxRetries: 0 }).geocode({ addresses: [address] }));
+      expect(error).toMatchObject({ code, status });
+    });
+
+    it("fails with provider_error when a 200 holds no JSON", async () => {
+      const fetch = fakeFetch({ body: "<html>" });
+      const error = await caught(onOg(fetch).geocode({ addresses: [address] }));
+      expect(error).toMatchObject({ code: "provider_error", status: 200, operation: "geocode" });
+    });
   });
 
-  it("geocodes a batch", async () => {
-    const answer = await live().batch.geocode([
-      "4820 Kestrel Blvd, Harrowmere, OH",
-      "9 Tallowfield Ct, Quillfield, CO",
-    ]);
-    expect(answer.mode).toBe("native");
-    expect(answer.items).toHaveLength(2);
-  });
+  describe("plugins", () => {
+    it("are told the point of every candidate when one item was asked for", async () => {
+      const { plugin, seen } = recorder();
+      const two = {
+        responses: [
+          {
+            status: "OK",
+            results: [
+              geocodeFixture.responses[0]!.results[0],
+              { address: {} },
+              { location: { feature: { geometry: { type: "Point", coordinates: [7.5, 43.5] } } } },
+            ],
+          },
+        ],
+      };
+      const fetch = fakeFetch(
+        { body: two },
+        { body: reverseFixture },
+        { body: lookupFixture },
+        { body: verifyFixture },
+      );
+      const client = onOg(fetch, { plugins: [plugin] });
+      await client.geocode({ addresses: [address] });
+      await client.reverseGeocode({ locations: [{ longitude: 1, latitude: 2, country: "USA" }] });
+      await client.lookup({ keys: [{ key: "k", type: "PB_KEY", country: "USA" }] });
+      await client.verify({ addresses: [address] });
+      expect(seen).toEqual({
+        // The candidate without a point is left out.
+        geocode: [
+          { lat: 40.117485, lon: -82.914362 },
+          { lat: 43.5, lon: 7.5 },
+        ],
+        reverseGeocode: [{ lat: 39.526618, lon: -105.318274 }],
+        lookup: [{ lat: 39.526618, lon: -105.318274 }],
+        // Verify answers no location.
+        verify: [],
+      });
+    });
 
-  it("issues a token", async () => {
-    const token = await live().native.token();
-    expect(typeof token.access_token).toBe("string");
-    expect(typeof token.expires_in).toBe("number");
+    it("are told the first point of each item of a batch", async () => {
+      const { plugin, seen } = recorder();
+      const fetch = fakeFetch({ status: 206, body: partialFixture });
+      await onOg(fetch, { plugins: [plugin] }).geocode({
+        addresses: [{ country: "QQQ" }, address],
+      });
+      // The failed item has no point and is left out.
+      expect(seen["geocode"]).toEqual([{ lat: 40.117485, lon: -82.914362 }]);
+    });
+
+    it.each(["autocomplete", "expressAutocomplete", "expressAutocompleteV2"] as const)(
+      "are told the point of every prediction of %s",
+      async (method) => {
+        const { plugin, seen } = recorder();
+        const fetch = fakeFetch({ body: autocompleteFixture });
+        await onOg(fetch, { plugins: [plugin] })[method]({ address });
+        expect(seen[method]).toEqual([
+          { lat: 44.318639999999995, lon: -89.73128 },
+          { lat: 45.061385, lon: -94.20716999999999 },
+        ]);
+      },
+    );
+
+    it("can send any lookup again on another client, by the name of its method", async () => {
+      const lookups = CASES.slice(0, 7);
+      for (const expected of lookups) {
+        const second = fakeFetch(expected.reply);
+        const other = onOg(second);
+        const elsewhere: Plugin = { name: "elsewhere", handle: (call) => call.run(other) };
+        const first = fakeFetch(TOKEN, { status: 500, body: internalFixture });
+        const outcome = await expected
+          .call(onVendor(first, { plugins: [elsewhere] }))
+          .withResponse();
+        expect(first).not.toHaveBeenCalled();
+        expectRequest(second, 0, OG_ROOT, expected);
+        expect(outcome.data).toEqual(expected.reply.body);
+        expect(outcome.server).toBe("og");
+      }
+    });
+
+    it("never see the token, file and job calls", async () => {
+      const handle = vi.fn<Plugin["handle"]>((_call, next) => next());
+      const fetch = fakeFetch({ body: jobStatusFixture });
+      const client = onOg(fetch, { plugins: [{ name: "spy", handle }] });
+      const url = `${OG_ROOT}/v2/files/${FILE_ID}/content`;
+      await client.token();
+      await client.bulk.uploadUrl({ fileName: "f" });
+      await client.bulk.upload({ url, content: "a" });
+      await client.bulk.files();
+      await client.bulk.deleteFile({ fileId: FILE_ID });
+      await client.bulk.geocode({ fileId: FILE_ID });
+      await client.bulk.verify({ fileId: FILE_ID });
+      await client.bulk.jobs();
+      await client.bulk.status({ jobId: JOB_ID });
+      await client.bulk.cancel({ jobId: JOB_ID });
+      await client.bulk.results({ downloadUrl: `${OG_ROOT}/v2/bulk/jobs/${JOB_ID}/output` });
+      expect(fetch).toHaveBeenCalledTimes(11);
+      expect(handle).not.toHaveBeenCalled();
+      await client.geocode({ addresses: [address] });
+      expect(handle).toHaveBeenCalledTimes(1);
+    });
   });
 });

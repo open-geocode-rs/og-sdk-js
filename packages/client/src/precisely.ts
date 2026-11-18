@@ -1,1103 +1,623 @@
 /**
- * The adapter for Precisely's Geo Addressing API.
+ * A client that speaks Precisely's Data Integrity Suite APIs.
+ * Its methods, requests and responses are Precisely's own, and an answer is handed back as it was sent.
  *
  * ```ts
- * import { Geocoder } from "@open-geocode/client";
  * import { precisely } from "@open-geocode/client/precisely";
- * const geo = new Geocoder({
- *   adapter: precisely({ apiKey: "...", apiSecret: "...", defaultCountry: "US" }),
+ *
+ * // Ask an og server, which answers in Precisely's shape. No Precisely account is needed.
+ * const client = precisely({ baseUrl: "https://og.example.com" });
+ * // Or ask Precisely itself.
+ * const vendor = precisely({ apiKey: "...", apiSecret: "..." });
+ *
+ * const { responses } = await client.geocode({
+ *   addresses: [{ addressLines: ["2 Avenue de Monte-Carlo"], country: "MCO" }],
  * });
  * ```
  */
 import {
-  type Adapter,
-  type AdapterBatchItem,
-  type AdapterOptions,
-  type AdapterResult,
-  type BatchContext,
-  chunk,
-  createTransport,
-  emptyAddress,
-  type NativeRequest,
-  nativeRequest,
-  pool,
-  text,
-} from "./adapter.ts";
-import { APIPromise, type RequestOptions, type WithResponse } from "./core.ts";
-import { alpha2 } from "./iso.ts";
-import { GeocoderError, type GeocoderErrorCode, OgError } from "./errors.ts";
+  type ClientInfo,
+  type CommonOptions,
+  createBase,
+  type Position,
+  type Step,
+} from "./base.ts";
+import { type APIPromise, type CacheRule, type Call, type RequestOptions } from "./core.ts";
+import {
+  APIConnectionTimeoutError,
+  APIUserAbortError,
+  type GeocoderErrorCode,
+  OgError,
+} from "./errors.ts";
 import type {
-  Accuracy,
-  BaseRequest,
-  FieldName,
-  Match,
-  MatchStatus,
-  PlaceRecord,
-  PlaceType,
-  StructuredAddress,
-  TextRange,
-} from "./types.ts";
+  AutocompleteParams,
+  AutocompleteResponse,
+  BulkJobParams,
+  BulkJobResponse,
+  CancelJobResponse,
+  DeleteFileParams,
+  DeleteFileResponse,
+  ExpressAutocompleteV2Params,
+  GeocodeParams,
+  GeocodeResponse,
+  JobParams,
+  JobStatusResponse,
+  ListFilesResponse,
+  ListJobsParams,
+  ListJobsResponse,
+  LookupParams,
+  LookupResponse,
+  ResultsParams,
+  ReverseGeocodeParams,
+  ReverseGeocodeResponse,
+  TokenResponse,
+  UploadParams,
+  UploadUrlParams,
+  UploadUrlResponse,
+  VerifyParams,
+  VerifyResponse,
+} from "./precisely.types.ts";
 
+export type * from "./precisely.types.ts";
+
+/** The host of the token call and the bulk calls, and of the real-time calls unless a region is chosen. */
 const HOST = "https://api.cloud.precisely.com";
 
-interface PreciselyCommonOptions extends AdapterOptions {
-  /** The Geo Addressing host. Default `https://api.cloud.precisely.com`. Precisely also runs regional hosts. */
+/** The regions Precisely answers real-time Geo Addressing calls from, besides its default host. */
+export type PreciselyRegion = "eu1" | "au1" | "gb1";
+
+/** Options for {@link precisely}. Give `baseUrl`, or `apiKey` with `apiSecret`. */
+export interface PreciselyOptions extends CommonOptions {
+  /** An og server. Requests go to `<baseUrl>/compat/precisely`, and no key, secret or token is sent. */
   baseUrl?: string | undefined;
-  /** The host of the token endpoint. Default `https://api.cloud.precisely.com`. */
-  authBaseUrl?: string | undefined;
-  /** The host of the bulk file flow. Default `https://api.cloud.precisely.com`. */
-  bulkBaseUrl?: string | undefined;
+  /** A Precisely API key, for asking Precisely itself. It needs `apiSecret`. */
+  apiKey?: string | undefined;
+  /** The secret of the API key. */
+  apiSecret?: string | undefined;
   /**
-   * The country searched when a call names none, as an ISO 3166-1 code.
-   * Precisely needs a country on every request, and `reverse` has no other way to give one.
+   * The regional host that answers the real-time calls when Precisely itself is asked.
+   * Default `https://api.cloud.precisely.com`.
+   * The token call and the bulk calls always go to the default host, the only one Precisely documents for them.
    */
-  defaultCountry?: string | undefined;
+  region?: PreciselyRegion | undefined;
 }
 
-/** Options for {@link precisely} with an API key and secret. */
-export interface PreciselyKeyOptions extends PreciselyCommonOptions {
-  apiKey: string;
-  apiSecret: string;
-  token?: undefined;
-}
-
-/** Options for {@link precisely} with a bearer token. */
-export interface PreciselyTokenOptions extends PreciselyCommonOptions {
-  /** An access token, or a function that answers one. The function is called for every request, so it should cache. */
-  token: string | (() => string | Promise<string>);
-  apiKey?: undefined;
-  apiSecret?: undefined;
-}
-
-/** Options for {@link precisely}. */
-export type PreciselyOptions = PreciselyKeyOptions | PreciselyTokenOptions;
-
-/** A distance as Precisely writes it. */
-export interface PreciselyDistance {
-  value?: number;
-  distanceUnit?: "FOOT" | "METER" | "MILE" | "KILOMETER";
-}
-
-/** The `preferences` object every Precisely operation accepts. */
-export interface PreciselyPreferences {
-  maxResults?: number;
-  returnAllInfo?: boolean;
-  factoryDescription?: { label?: string; featureSpecific?: Record<string, string> };
-  customPreferences?: Record<string, string>;
-  clientLocale?: string | Record<string, unknown>;
-  clientCoordSysName?: string;
-  distance?: PreciselyDistance;
-  streetOffset?: PreciselyDistance;
-  cornerOffset?: PreciselyDistance;
-  fallbackToGeographic?: boolean;
-  fallbackToPostal?: boolean;
-  matchMode?: string;
-  originXY?: number[];
-  returnOfAdditionalFields?: string[];
-}
-
-/** An address as Precisely takes it. */
-export interface PreciselyAddressInput {
-  addressId?: string;
-  addressLines?: string[];
-  country: string;
-  addressNumber?: string;
-  street?: string;
-  city?: string;
-  admin1?: string;
-  admin2?: string;
-  borough?: string;
-  neighborhood?: string;
-  suburb?: string;
-  postalCode?: string;
-  postalCodeExt?: string;
-  placeName?: string;
-  building?: string;
-  floor?: string;
-  room?: string;
-  unit?: string;
-  unitType?: string;
-}
-
-/** A named area in a Precisely address. */
-export interface PreciselyAdmin {
-  longName?: string;
-  shortName?: string;
-}
-
-/** The address of a Precisely result. */
-export interface PreciselyAddress {
-  formattedAddress?: string;
-  formattedStreetAddress?: string;
-  formattedLocationAddress?: string;
-  addressNumber?: string;
-  street?: string;
-  postalCode?: string;
-  postalCodeExt?: string;
-  placeName?: string;
-  building?: string;
-  floor?: string;
-  room?: string;
-  unit?: string;
-  unitType?: string;
-  country?: {
-    name?: string;
-    isoAlpha2Code?: string;
-    isoAlpha3Code?: string;
-    isoNumericCode?: string;
-  };
-  admin1?: PreciselyAdmin;
-  admin2?: PreciselyAdmin;
-  city?: PreciselyAdmin;
-  borough?: PreciselyAdmin;
-  neighborhood?: PreciselyAdmin;
-  suburb?: PreciselyAdmin;
-}
-
-/** One candidate of a Precisely answer. */
-export interface PreciselyResult {
-  score?: number;
-  address?: PreciselyAddress;
-  addressLines?: string[];
-  location?: {
-    explanation?: {
-      type?: string;
-      description?: string;
-      designation?: string;
-      additionalMetadata?: Record<string, string>;
-    };
-    feature?: {
-      type?: string;
-      properties?: Record<string, string>;
-      geometry?: { type?: string; coordinates?: number[] };
-    };
-  };
-  explanation?: {
-    identifier?: string;
-    addressMatch?: {
-      type?: string;
-      description?: {
-        label?: string;
-        matchType?: string;
-        returnType?: string;
-        matchedSubstring?: string;
-      }[];
-    };
-    source?: Record<string, string>;
-  };
-  customFields?: Record<string, string>;
-  parsed?: unknown[];
-  iso20022?: unknown;
-}
-
-/** One suggestion of `/v1/autocomplete`. */
-export interface PreciselyPrediction extends PreciselyResult {
-  prediction?: string;
-  distance?: PreciselyDistance;
-}
-
-/** The answer for one address, point or key. */
-export interface PreciselyResponse {
-  addressId?: string;
-  status?: string;
-  errorMessage?: string;
-  results?: PreciselyResult[];
-}
-
-/** The body of a geocode, reverse geocode, lookup or verify answer. */
-export interface PreciselyResponses {
-  responses?: PreciselyResponse[];
-}
-
-/** The body of an autocomplete answer. */
-export interface PreciselyAutocompleteResponse {
-  response?: { status?: string; errorMessage?: string; predictions?: PreciselyPrediction[] };
-}
-
-/** The body `/v1/geocode` and `/v1/verify` take. */
-export interface PreciselyAddressesRequest {
-  preferences?: PreciselyPreferences;
-  addresses: PreciselyAddressInput[];
-}
-
-/** The answer of `POST /auth/v2/token`. */
-export interface PreciselyToken {
-  access_token: string;
-  token_type: string;
-  /** Seconds the token lasts. */
-  expires_in: number;
-  scope: string;
-}
-
-/** The answer of `POST /v2/files/upload-url`. */
-export interface PreciselyUploadUrl {
-  fileId: string;
-  /** Where to `PUT` the file. Valid for ten minutes. */
-  url: string;
-  message: string;
-}
-
-/** The body `/v2/bulk-geocode` and `/v2/bulk-verify` take. */
-export interface PreciselyBulkRequest {
-  fileId: string;
-  /** One of `,`, `;`, `|` and tab. */
-  delimiter?: string;
-  preferences?: PreciselyPreferences;
-  reportDetails?: {
-    listProcessorName?: string;
-    listNameId?: string;
-    totalList?: string;
-    mailingAddress?: string;
-    postNumber?: string;
-  };
-  notifyEmails?: string[];
-}
-
-/** The answer to a bulk submission. */
-export interface PreciselyBulkSubmission {
-  /** Where the job's status is read. Pass it to `bulk.status`. */
-  statusUrl: string;
-  status?: string | null;
-  message?: string | null;
-}
-
-/** The state of a bulk job. */
-export interface PreciselyJobStatus {
-  status:
-    | "SCHEDULED"
-    | "RUNNING"
-    | "COMPLETED"
-    | "FAILED"
-    | "CANCELED"
-    | "REJECTED"
-    | (string & {});
-  /** Where the output file is fetched from. Valid for ten minutes. */
-  downloadUrl?: string;
-  reportUrl?: string;
-  message?: string;
-  error?: string;
-}
-
-/** A scheduled or running bulk job. */
-export interface PreciselyQueuedJob {
-  jobId: string;
-  emailId: string;
-  fileId: string;
-  fileName: string;
-  status: string;
-  submittedAt: string;
-}
-
-/** Options for a bulk submission. */
-export interface PreciselyBulkOptions extends RequestOptions {
-  /** Sent as `X-CASS-FLOW`. */
-  cassFlow?: "with_report" | "no_report" | undefined;
-}
-
-/**
- * Precisely's file flow for large jobs.
- * The layout of its output file is not documented, so it stays outside the unified batch.
- */
-export interface PreciselyBulk {
-  /** Asks for a file ID and the URL to upload the input file to. */
-  uploadUrl(fileName: string, options?: RequestOptions): APIPromise<PreciselyUploadUrl>;
-  /** Sends the input file to the URL `uploadUrl` answered. */
-  upload(
-    url: string,
-    content: string,
-    options?: RequestOptions & { contentType?: string | undefined },
-  ): APIPromise<void>;
-  /** Starts a geocode job over an uploaded file. */
-  geocode(
-    body: PreciselyBulkRequest,
-    options?: PreciselyBulkOptions,
-  ): APIPromise<PreciselyBulkSubmission>;
-  /** Starts a verify job over an uploaded file. */
-  verify(
-    body: PreciselyBulkRequest,
-    options?: PreciselyBulkOptions,
-  ): APIPromise<PreciselyBulkSubmission>;
-  /** The state of a job, by its ID or by the `statusUrl` of its submission. */
-  status(job: string, options?: RequestOptions): APIPromise<PreciselyJobStatus>;
-  /** Cancels a job that has not started, by its ID or by the `statusUrl` of its submission. */
-  cancel(job: string, options?: RequestOptions): APIPromise<{ jobId: string; message: string }>;
-  /** The scheduled and running jobs. */
-  jobs(
-    status?: "scheduled" | "running" | "all",
+/** The Precisely client. */
+export interface PreciselyClient extends ClientInfo {
+  /**
+   * `POST /auth/v2/token`. Trades the API key and secret for a bearer token.
+   * The other methods do this by themselves, so call it only to hand a token to something else.
+   */
+  token(options?: RequestOptions): APIPromise<TokenResponse>;
+  /** `POST /v1/geocode`. Finds the point of up to 25 addresses. */
+  geocode(params: GeocodeParams, options?: RequestOptions): APIPromise<GeocodeResponse>;
+  /** `POST /v1/reverse-geocode`. Finds the address at up to 25 points. */
+  reverseGeocode(
+    params: ReverseGeocodeParams,
     options?: RequestOptions,
-  ): APIPromise<{ jobs: PreciselyQueuedJob[] }>;
-  /** The uploaded input files. */
-  files(options?: RequestOptions): APIPromise<{ results: { fileId: string; fileName: string }[] }>;
-  deleteFile(
-    fileId: string,
+  ): APIPromise<ReverseGeocodeResponse>;
+  /** `POST /v1/lookup`. Finds the address of up to 25 keys, such as the `PB_KEY` of an earlier answer. */
+  lookup(params: LookupParams, options?: RequestOptions): APIPromise<LookupResponse>;
+  /** `POST /v1/verify`. Checks and corrects up to 25 addresses. */
+  verify(params: VerifyParams, options?: RequestOptions): APIPromise<VerifyResponse>;
+  /** `POST /v1/autocomplete`. Predicts the address being typed. It is not retried unless `maxRetries` says so. */
+  autocomplete(
+    params: AutocompleteParams,
     options?: RequestOptions,
-  ): APIPromise<{ status: string; message: string }>;
+  ): APIPromise<AutocompleteResponse>;
+  /** `POST /v1/express-autocomplete`. The same as `autocomplete`, from Precisely's faster index. */
+  expressAutocomplete(
+    params: AutocompleteParams,
+    options?: RequestOptions,
+  ): APIPromise<AutocompleteResponse>;
+  /** `POST /v2/express-autocomplete`. The same again, with `preferences.filterBias` to narrow or rank the predictions. */
+  expressAutocompleteV2(
+    params: ExpressAutocompleteV2Params,
+    options?: RequestOptions,
+  ): APIPromise<AutocompleteResponse>;
+  /** Bulk Geo Addressing v2. Upload a file, start a job over it, poll the job and read its output. */
+  bulk: {
+    /** `POST /v2/files/upload-url`. Asks for a file ID and the URL to upload the input file to. */
+    uploadUrl(params: UploadUrlParams, options?: RequestOptions): APIPromise<UploadUrlResponse>;
+    /** `PUT {url}`. Sends the input file to the URL `uploadUrl` answered. It is never retried. */
+    upload(params: UploadParams, options?: RequestOptions): APIPromise<void>;
+    /** `GET /v2/files`. Lists the uploaded files. */
+    files(options?: RequestOptions): APIPromise<ListFilesResponse>;
+    /** `DELETE /v2/files/{fileId}`. Deletes an uploaded file. */
+    deleteFile(params: DeleteFileParams, options?: RequestOptions): APIPromise<DeleteFileResponse>;
+    /** `POST /v2/bulk-geocode`. Starts a geocode job over an uploaded file. It is never retried. */
+    geocode(params: BulkJobParams, options?: RequestOptions): APIPromise<BulkJobResponse>;
+    /** `POST /v2/bulk-verify`. Starts a verify job over an uploaded file. It is never retried. */
+    verify(params: BulkJobParams, options?: RequestOptions): APIPromise<BulkJobResponse>;
+    /** `GET /v2/bulk/jobs`. Lists the jobs that wait or run. */
+    jobs(params?: ListJobsParams, options?: RequestOptions): APIPromise<ListJobsResponse>;
+    /** `GET /v2/bulk/jobs/{jobId}`. Reads the state of a job, and where its output is once it completed. */
+    status(params: JobParams, options?: RequestOptions): APIPromise<JobStatusResponse>;
+    /** `DELETE /v2/bulk/jobs/{jobId}`. Cancels a job that has not started. */
+    cancel(params: JobParams, options?: RequestOptions): APIPromise<CancelJobResponse>;
+    /**
+     * `GET {downloadUrl}`. Reads the output file of a completed job, as CSV text.
+     * The whole file is held in memory. For a large one, fetch `downloadUrl` yourself and read it as a stream.
+     */
+    results(params: ResultsParams, options?: RequestOptions): APIPromise<string>;
+  };
 }
 
-/** Precisely's own API, with the adapter's credentials. */
-export interface PreciselyNative {
-  /** Any Geo Addressing call. A path is read under `baseUrl`. */
-  request: NativeRequest;
-  /** Trades the API key and secret for a bearer token. */
-  token(options?: RequestOptions): APIPromise<PreciselyToken>;
-  /** Address verification, `POST /v1/verify`. */
-  verify(body: PreciselyAddressesRequest, options?: RequestOptions): APIPromise<PreciselyResponses>;
-  bulk: PreciselyBulk;
+/** The job ID in the `statusUrl` a bulk submission answers, which is the last segment of its path. */
+export function jobIdOf(statusUrl: string): string {
+  const path = statusUrl.split(/[?#]/)[0] ?? "";
+  return path.replace(/\/+$/, "").split("/").pop() ?? "";
 }
 
-/** The most addresses, points or keys Precisely takes in one request. */
-const BATCH_SIZE = 25;
+// A cache never keeps an answer longer than the server that gave it allows. For Precisely that is 30 days.
+const CACHE: CacheRule = { maxTtl: 30 * 86_400_000 };
+/** A token, a job's state and a signed URL all go stale within minutes, so none of them is kept. */
+const NEVER: CacheRule = { maxTtl: 0 };
 
-/** The suggestions asked for when the caller names no limit. Precisely's own default is one, too few to choose from. */
-const SUGGESTIONS = 5;
+/** A token is renewed this long before Precisely would refuse it, so a request never leaves with one about to expire. */
+const RENEW_BEFORE_MS = 60_000;
 
-/** The key types `/v1/lookup` takes. A result carries its key in `customFields` under the same name. */
-const KEY_TYPES = ["PB_KEY", "GNAF_PID", "UPRN", "UDPRN", "EIR_CODE"] as const;
+/** Fields of the params that travel as request headers, under the same names. */
+const HEADER_FIELDS: ReadonlySet<string> = new Set([
+  "X-Request-Id",
+  "X-Transaction-Id",
+  "X-CASS-FLOW",
+]);
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Parts the params into the headers and what is left, which is the body or the path and query. */
+function split(params: object | undefined): {
+  headers: Record<string, string>;
+  rest: Record<string, unknown>;
+} {
+  const headers: Record<string, string> = {};
+  const rest: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(params ?? {})) {
+    if (!HEADER_FIELDS.has(name)) rest[name] = value;
+    else if (typeof value === "string") headers[name] = value;
+  }
+  return { headers, rest };
+}
 
-const ACCURACY: Record<string, Accuracy> = {
-  ADDRESS_POINT: "rooftop",
-  POI: "rooftop",
-  POSTAL_BUILDING: "rooftop",
-  ADDRESS_INTERPOLATED: "interpolated",
-  INTERSECTION: "street",
-  STREET: "street",
-  STREET_CENTER: "street",
-  STREET_BLOCK: "street",
-  POSTAL: "centroid",
-  POSTAL_CENTROID: "centroid",
-  SUB_TOWN_CENTROID: "centroid",
-  TOWN_CENTROID: "centroid",
-  ADMIN1: "centroid",
-  ADMIN1_CENTROID: "centroid",
-  ADMIN2: "centroid",
-  ADMIN2_CENTROID: "centroid",
-  CITY: "centroid",
-  NEIGHBORHOOD: "centroid",
-  SUBURB: "centroid",
-  COUNTRY: "centroid",
-  NEAR_BY_ADDRESS: "approximate",
-  PO_BOX: "approximate",
-};
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined;
 
-/** What a location type says the result is, when the match type does not. */
-const LOCATION_TYPES: Record<string, PlaceType> = {
-  ADDRESS_POINT: "address",
-  ADDRESS_INTERPOLATED: "address",
-  NEAR_BY_ADDRESS: "address",
-  POSTAL_BUILDING: "address",
-  PO_BOX: "address",
-  INTERSECTION: "intersection",
-  STREET: "street",
-  STREET_CENTER: "street",
-  STREET_BLOCK: "street",
-  POI: "poi",
-  POSTAL: "postcode",
-  POSTAL_CENTROID: "postcode",
-  NEIGHBORHOOD: "neighbourhood",
-  SUBURB: "neighbourhood",
-  SUB_TOWN_CENTROID: "neighbourhood",
-  CITY: "locality",
-  TOWN_CENTROID: "locality",
-  ADMIN2: "district",
-  ADMIN2_CENTROID: "district",
-  ADMIN1: "region",
-  ADMIN1_CENTROID: "region",
-  COUNTRY: "country",
-};
+const record = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 
-const METRES: Record<string, number> = { METER: 1, KILOMETER: 1000, FOOT: 0.3048, MILE: 1609.344 };
-
-const COMPONENTS: Record<string, keyof Match["components"]> = {
-  addressNumber: "houseNumber",
-  street: "street",
-  unitMatch: "unit",
-  city: "locality",
-  admin2: "district",
-  admin1: "region",
-  postalCode: "postcode",
-};
-
-const MATCHES: Record<string, MatchStatus> = {
-  EXACT: "matched",
-  ALIAS_EXACT: "matched",
-  PARTIAL: "partial",
-  ALIAS_PARTIAL: "partial",
-  ADDED: "inferred",
-  REMOVED: "unmatched",
-  NONE: "unmatched",
-};
-
-/** The HTTP status that says what a per-item `status` says. */
-const HTTP_STATUS: Record<string, number> = {
-  INVALID_REQUEST: 400,
-  INVALID_CLIENT_INPUT: 400,
-  BAD_REQUEST: 400,
-  INVALID_TOKEN: 401,
-  FORBIDDEN: 403,
-  REQUEST_TIMEOUT: 408,
-  BATCH_SIZE_EXCEEDED: 413,
-  TOO_MANY_REQUESTS: 429,
-  INTERNAL_ERROR: 500,
-  UNKNOWN_ERROR: 500,
-  SERVICE_UNAVAILABLE: 503,
-};
-
-const STATUS_CODES: Record<string, GeocoderErrorCode> = {
-  INVALID_REQUEST: "invalid_request",
-  INVALID_CLIENT_INPUT: "invalid_request",
-  BAD_REQUEST: "invalid_request",
-  INVALID_TOKEN: "unauthenticated",
-  FORBIDDEN: "permission_denied",
-  REQUEST_TIMEOUT: "timeout",
-  BATCH_SIZE_EXCEEDED: "payload_too_large",
-  TOO_MANY_REQUESTS: "rate_limited",
-  INTERNAL_ERROR: "provider_error",
-  UNKNOWN_ERROR: "provider_error",
-  SERVICE_UNAVAILABLE: "unavailable",
-};
-
-/** Error codes whose meaning neither the HTTP status nor the `status` word is documented to carry. */
-const DIS_CODES: Record<string, GeocoderErrorCode> = {
-  "DIS-1004": "unauthenticated",
-  "DIS-1006": "unauthenticated",
-  "DIS-1007": "rate_limited",
-};
-
-const GEOCODE_FIELDS: readonly FieldName[] = [
-  "id",
-  "location",
-  "accuracy",
-  "address",
-  "addressDetails",
-  "addressLines",
-];
-
-type Operation = "geocode" | "reverse" | "autocomplete" | "lookup";
-
-/** The first entry of Precisely's error envelope, or a failed item, which has the same two fields. */
-function envelope(body: unknown): { status?: unknown; errorMessage?: unknown } | undefined {
-  if (body === null || typeof body !== "object") return undefined;
-  const { errors } = body as { errors?: unknown };
-  const first: unknown = Array.isArray(errors) ? errors[0] : body;
-  return first !== null && typeof first === "object" ? first : undefined;
+/** The first entry of Precisely's error envelope. */
+function firstError(body: unknown): Record<string, unknown> | undefined {
+  const errors = record(body)?.["errors"];
+  return Array.isArray(errors) ? record(errors[0]) : undefined;
 }
 
 function describeError(body: unknown): string | undefined {
-  if (body === null || typeof body !== "object") return undefined;
-  const { errors, error_description: description } = body as {
-    errors?: unknown;
-    error_description?: unknown;
-  };
+  const errors = record(body)?.["errors"];
   if (Array.isArray(errors)) {
     const messages = errors
-      .map((error: unknown) => text((error as { errorMessage?: unknown } | null)?.errorMessage))
-      .filter((message) => message !== null);
+      .map((error: unknown) => text(record(error)?.["errorMessage"]))
+      .filter((message) => message !== undefined);
     if (messages.length > 0) return messages.join(" ");
   }
-  // The token endpoint answers in the OAuth error shape.
-  return text(description) ?? undefined;
-}
-
-/** A per-item failure as the error its `status` stands for. */
-function failure(
-  item: { status?: string; errorMessage?: string },
-  answer: { response: Response; requestId: string | undefined },
-): OgError {
-  return OgError.fromResponse(
-    HTTP_STATUS[item.status ?? ""] ?? 500,
-    item,
-    answer.response.headers,
-    {
-      provider: "precisely",
-      message: item.errorMessage ?? `Precisely answered ${item.status}.`,
-      requestId: answer.requestId,
-    },
-  );
+  // The token call answers in the OAuth error shape.
+  return text(record(body)?.["error_description"]);
 }
 
 /**
- * The ID `lookup` takes back, as `<KEY_TYPE>:<key>:<country>`.
- * Precisely has no single record ID. `/v1/lookup` wants a key, its type and its country, so the ID carries all three.
- * The country is left out when the record names none. `lookup` then falls back to `defaultCountry`.
+ * Precisely's error codes whose meaning the HTTP status does not carry, or is not documented to carry.
+ * The token call, for one, answers a wrong key with 400.
  */
-function idOf(result: PreciselyResult): string | null {
-  for (const type of KEY_TYPES) {
-    const key = text(result.customFields?.[type]);
-    if (key === null) continue;
-    const country =
-      text(result.address?.country?.isoAlpha2Code) ?? text(result.address?.country?.isoAlpha3Code);
-    return country === null ? `${type}:${key}` : `${type}:${key}:${country}`;
-  }
-  return null;
-}
+const DIS_CODES: Record<string, GeocoderErrorCode> = {
+  "DIS-1004": "unauthenticated",
+  "DIS-1006": "unauthenticated",
+  "DIS-LI-1013": "unauthenticated",
+  "DIS-LI-1024": "unauthenticated",
+  "DIS-AUTH-1002": "unauthenticated",
+  "DIS-AUTH-1003": "unauthenticated",
+  "DIS-AUTH-1020": "unauthenticated",
+  "DIS-1007": "rate_limited",
+  "DIS-1009": "rate_limited",
+  "DIS-1010": "permission_denied",
+  "DIS-AUTH-1022": "permission_denied",
+  "DIS-LI-1029": "permission_denied",
+  "DIS-LI-1035": "permission_denied",
+};
 
-function decodeId(
-  id: string,
-): { type: string; key: string; country: string | undefined } | undefined {
-  const [type, ...rest] = id.split(":");
-  if (!(KEY_TYPES as readonly string[]).includes(type ?? "")) return undefined;
-  const last = rest.length > 1 ? rest.at(-1) : undefined;
-  const country = last !== undefined && /^[A-Za-z]{2,3}$/.test(last) ? last : undefined;
-  const key = (country === undefined ? rest : rest.slice(0, -1)).join(":");
-  return key === "" ? undefined : { type: type as string, key, country };
-}
+/** A `status` word that says more than the HTTP status it comes with. */
+const STATUS_CODES: Record<string, GeocoderErrorCode> = {
+  REQUEST_TIMEOUT: "timeout",
+};
 
-function typeOf(match: string | undefined, location: string | undefined): PlaceType {
-  const located = LOCATION_TYPES[location ?? ""];
-  switch (match) {
-    case "ADDRESS":
-    case "POBOX":
-      return "address";
-    case "STREET":
-      return located === "intersection" ? "intersection" : "street";
-    case "POI":
-      return "poi";
-    case "NOMATCH":
-      return "unknown";
-    case "ADMIN":
-      // The match type names no tier, so the location type must.
-      return located === undefined || ["address", "street", "intersection", "poi"].includes(located)
-        ? "unknown"
-        : located;
-    default:
-      return located ?? "unknown";
-  }
-}
+/** The OAuth errors of the token call that its HTTP status, always 400 or 500, does not tell apart. */
+const OAUTH_CODES: Record<string, GeocoderErrorCode> = {
+  access_denied: "permission_denied",
+  temporarily_unavailable: "unavailable",
+};
 
-function metres(distance: PreciselyDistance | undefined): number | null {
-  const factor = METRES[distance?.distanceUnit ?? ""];
-  return typeof distance?.value === "number" && factor !== undefined
-    ? distance.value * factor
-    : null;
-}
+/** A token call that answered 200 without a token that can be used. */
+class TokenError extends OgError {}
 
-/** How far a reverse result lies from the point asked for. */
-function reverseDistance(fields: Record<string, string> | undefined): number | null {
-  const value = text(fields?.REVERSE_GEOCODE_DISTANCE);
-  // Only metres are documented for this field, and another unit is not guessed at.
-  if (value === null || fields?.REVERSE_GEOCODE_DISTANCE_UNIT !== "METERS") return null;
-  const distance = Number(value);
-  return Number.isFinite(distance) ? distance : null;
-}
-
-function matchOf(result: PreciselyResult): Match | null {
-  const description = result.explanation?.addressMatch?.description;
-  if (description === undefined && typeof result.score !== "number") return null;
-  const components: Match["components"] = {};
-  for (const part of description ?? []) {
-    const component = COMPONENTS[part.label ?? ""];
-    const status = MATCHES[part.matchType ?? ""];
-    if (component !== undefined && status !== undefined) components[component] = status;
-  }
-  return {
-    score: typeof result.score === "number" ? result.score / 100 : null,
-    label: null,
-    components,
-  };
-}
-
-/** The typed text found in `label`. A substring that is absent, or there more than once, cannot be placed. */
-function highlightsOf(result: PreciselyResult, label: string): TextRange[] | null {
-  const ranges: TextRange[] = [];
-  for (const part of result.explanation?.addressMatch?.description ?? []) {
-    const typed = text(part.matchedSubstring);
-    if (typed === null) continue;
-    const start = label.indexOf(typed);
-    if (start === -1 || label.indexOf(typed, start + 1) !== -1) continue;
-    // Kept in reading order, whatever order the parts come in.
-    const after = ranges.findIndex((range) => range.start > start);
-    ranges.splice(after === -1 ? ranges.length : after, 0, { start, end: start + typed.length });
-  }
-  return ranges.length === 0 ? null : ranges;
-}
-
-function toPlace(
-  result: PreciselyPrediction,
-  operation: Operation,
-  request: Pick<BaseRequest, "focus">,
-): PlaceRecord {
-  const stated = result.address;
-  const coordinates = result.location?.feature?.geometry?.coordinates;
-  const [lon, lat] = coordinates ?? [];
-  const located = result.location?.explanation?.type;
-  const type = typeOf(result.explanation?.addressMatch?.type, located);
-  const address = emptyAddress();
-  address.houseNumber = text(stated?.addressNumber);
-  address.street = text(stated?.street);
-  address.unit = text(stated?.unit);
-  address.neighbourhood = text(stated?.neighborhood?.longName);
-  address.locality = text(stated?.city?.longName);
-  address.district = text(stated?.admin2?.longName);
-  address.region = text(stated?.admin1?.longName);
-  address.regionCode = text(stated?.admin1?.shortName);
-  address.postcode = text(stated?.postalCode);
-  address.country = text(stated?.country?.name);
-  // Predictions carry only the three-letter code, which ISO maps to exactly one two-letter code.
-  address.countryCode =
-    text(stated?.country?.isoAlpha2Code)?.toUpperCase() ??
-    alpha2(stated?.country?.isoAlpha3Code ?? "") ??
-    null;
-  const lines = result.addressLines?.filter((line) => text(line) !== null) ?? [];
-  const label =
-    text(result.prediction) ?? text(stated?.formattedAddress) ?? (lines.join(", ") || "");
-  const named: Partial<Record<PlaceType, string | null>> = {
-    poi: text(stated?.placeName),
-    postcode: address.postcode,
-    neighbourhood: address.neighbourhood ?? text(stated?.suburb?.longName),
-    locality: address.locality,
-    district: address.district,
-    region: address.region,
-    country: address.country,
-  };
-  const searched = operation === "geocode" || operation === "autocomplete";
-  return {
-    id: idOf(result),
-    type,
-    name: named[type] ?? text(stated?.formattedStreetAddress) ?? lines[0] ?? label,
-    label,
-    location: typeof lat === "number" && typeof lon === "number" ? { lat, lon } : null,
-    accuracy: ACCURACY[located ?? ""] ?? null,
-    // `score` says how much the input was changed to match, which is not how sure Precisely is.
-    confidence: null,
-    distance:
-      operation === "reverse"
-        ? reverseDistance(result.customFields)
-        : // Without an origin the suggestion's distance is measured from nothing.
-          operation === "autocomplete" && request.focus !== undefined
-          ? metres(result.distance)
-          : null,
-    address,
-    addressDetails: {
-      unitType: text(stated?.unitType),
-      building: text(stated?.building),
-      floor: text(stated?.floor),
-      // A borough is the official part of a city. A suburb stands in where there is none.
-      sublocality: text(stated?.borough?.longName) ?? text(stated?.suburb?.longName),
-      postcodeSuffix: text(stated?.postalCodeExt),
-    },
-    addressLines: lines.length === 0 ? null : lines,
-    // Reverse and lookup have no query, and their `score` is always 0.
-    match: searched ? matchOf(result) : null,
-    highlights: operation === "autocomplete" ? highlightsOf(result, label) : null,
-    raw: result,
-  };
-}
-
-/** A geocode input as Precisely takes it. */
-function addressInput(
-  item: { query?: string; address?: StructuredAddress },
-  country: string,
-): PreciselyAddressInput {
-  const { address } = item;
-  if (address === undefined) return { addressLines: [item.query ?? ""], country };
-  return {
-    ...(address.address === undefined
-      ? {
-          ...(address.houseNumber === undefined ? {} : { addressNumber: address.houseNumber }),
-          ...(address.street === undefined ? {} : { street: address.street }),
-        }
-      : { addressLines: [address.address] }),
-    ...(address.locality === undefined ? {} : { city: address.locality }),
-    ...(address.region === undefined ? {} : { admin1: address.region }),
-    ...(address.postcode === undefined ? {} : { postalCode: address.postcode }),
-    country,
-  };
-}
-
-const needsCountry = (operation: string, hint: string): GeocoderError =>
-  new GeocoderError(`Precisely needs a country. ${hint}`, {
-    code: "invalid_request",
-    provider: "precisely",
-    operation,
-  });
-
-/** The preferences every search shares. */
-const preferences = (request: BaseRequest): PreciselyPreferences => ({
-  ...(request.limit === undefined ? {} : { maxResults: request.limit }),
-  // The lookup key lives in `customFields`, which Precisely documents only with all info returned.
-  returnAllInfo: true,
-});
-
-/** One item's candidates. Nothing found is an empty answer, and any other status is that item's error. */
-function settle(
-  item: PreciselyResponse,
-  answer: WithResponse<unknown>,
-  operation: Operation,
-  request: BaseRequest,
-): PlaceRecord[] {
-  if (item.status === "ZERO_RESULTS") return [];
-  if (item.status !== undefined && item.status !== "OK") throw failure(item, answer);
-  return (item.results ?? []).map((result) => toPlace(result, operation, request));
-}
-
-/** The job ID out of a status URL. A submission answers only the URL, and the documented one names a v1 path. */
-const jobId = (job: string): string =>
-  encodeURIComponent(job.replace(/\/+$/, "").split("/").pop() ?? "");
-
-const single = (
-  answer: WithResponse<PreciselyResponses>,
-  operation: Operation,
-  request: BaseRequest,
-): AdapterResult => ({
-  results: (answer.data.responses ?? []).flatMap((item) =>
-    settle(item, answer, operation, request),
-  ),
-  raw: answer.data,
-  response: answer.response,
-  requestId: answer.requestId,
-});
-
-/** The Precisely adapter. Its `native` reaches the rest of Precisely's API. */
-export function precisely(options: PreciselyOptions): Adapter<PreciselyNative> {
-  const { token } = options;
-  const basic = token === undefined ? btoa(`${options.apiKey}:${options.apiSecret}`) : undefined;
-  const transport = createTransport(options, {
-    name: "precisely",
-    baseUrl: options.baseUrl ?? HOST,
-    describeError,
-  });
-  // The upload goes to a storage host, which must not see the headers meant for Precisely.
-  const storage = createTransport(
-    { ...options, headers: undefined },
-    { name: "precisely", baseUrl: "", describeError },
+function errorCode(error: OgError): GeocoderErrorCode | undefined {
+  if (error instanceof TokenError) return "provider_error";
+  const first = firstError(error.body);
+  const message =
+    text(first?.["errorMessage"]) ?? text(record(error.body)?.["error_description"]) ?? "";
+  const code = /\((DIS-[A-Z0-9-]+)\)/.exec(message)?.[1];
+  return (
+    DIS_CODES[code ?? ""] ??
+    STATUS_CODES[text(first?.["status"]) ?? ""] ??
+    OAUTH_CODES[text(record(error.body)?.["error"]) ?? ""]
   );
-  const authBaseUrl = (options.authBaseUrl ?? HOST).replace(/\/+$/, "");
-  const bulkBaseUrl = (options.bulkBaseUrl ?? HOST).replace(/\/+$/, "");
+}
 
-  const authorize = async (call: { headers: Record<string, string> }): Promise<void> => {
-    call.headers.authorization =
-      token === undefined
-        ? `Apikey ${basic}`
-        : `Bearer ${typeof token === "string" ? token : await token()}`;
-  };
-  const send = nativeRequest(transport, authorize);
-  const bulkRequest = nativeRequest(transport, authorize, bulkBaseUrl);
+/** The point of one candidate. Precisely writes it as x then y, which is longitude then latitude. */
+function pointOf(result: unknown): Position | undefined {
+  const location = record(record(result)?.["location"]);
+  const geometry = record(record(location?.["feature"])?.["geometry"]);
+  const coordinates: unknown = geometry?.["coordinates"];
+  if (!Array.isArray(coordinates)) return undefined;
+  const [lon, lat] = coordinates as unknown[];
+  return typeof lon === "number" &&
+    typeof lat === "number" &&
+    Number.isFinite(lon) &&
+    Number.isFinite(lat)
+    ? { lat, lon }
+    : undefined;
+}
 
-  /** A POST that only reads, so a retry may repeat it. */
-  const post = <T>(
-    path: string,
-    body: unknown,
-    call: RequestOptions | undefined,
-    headers?: Record<string, string>,
-  ): Promise<WithResponse<T>> =>
-    send<T>({
-      ...call,
-      path,
-      body,
-      idempotent: true,
-      ...(headers === undefined ? {} : { headers: { ...headers, ...call?.headers } }),
-    }).withResponse();
+const pointsOf = (results: unknown): Position[] =>
+  (Array.isArray(results) ? results : []).map(pointOf).filter((point) => point !== undefined);
 
-  /** The one country a request searches. */
-  function countryOf(request: BaseRequest, operation: string, own?: string): string {
-    const { countries } = request;
-    if (countries !== undefined && countries.length > 1)
-      throw new GeocoderError(
-        `Precisely searches one country per request, and \`countries\` names ${countries.length}.`,
-        { code: "unsupported", provider: "precisely", operation },
+/** The methods that answer `responses`, one entry per item sent. */
+const BATCH_METHODS: ReadonlySet<string> = new Set([
+  "geocode",
+  "reverseGeocode",
+  "lookup",
+  "verify",
+]);
+/** The methods that answer `response.predictions`. */
+const PREDICTION_METHODS: ReadonlySet<string> = new Set([
+  "autocomplete",
+  "expressAutocomplete",
+  "expressAutocompleteV2",
+]);
+
+/**
+ * The points of an answer. A request with one item gives every candidate of that item.
+ * A request with several gives the first candidate of each, so the points line up with the items.
+ */
+function positions(method: string, data: unknown): Position[] {
+  if (PREDICTION_METHODS.has(method))
+    return pointsOf(record(record(data)?.["response"])?.["predictions"]);
+  if (!BATCH_METHODS.has(method)) return [];
+  const responses = record(data)?.["responses"];
+  if (!Array.isArray(responses)) return [];
+  if (responses.length === 1) return pointsOf(record(responses[0])?.["results"]);
+  return responses
+    .map((item: unknown) => {
+      const results = record(item)?.["results"];
+      return Array.isArray(results) ? pointOf(results[0]) : undefined;
+    })
+    .filter((point) => point !== undefined);
+}
+
+/**
+ * Waits for work that several callers share, and gives up as soon as this caller's signal fires.
+ * The shared work goes on for the others.
+ */
+function until<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return work;
+  return new Promise<T>((resolve, reject) => {
+    const stop = (): void => {
+      const reason: unknown = signal.reason;
+      const timedOut = record(reason)?.["name"] === "TimeoutError";
+      reject(
+        timedOut
+          ? new APIConnectionTimeoutError(
+              "precisely did not answer before the caller's signal timed out.",
+              { cause: reason, provider: "precisely" },
+            )
+          : new APIUserAbortError("Request was aborted.", { cause: reason, provider: "precisely" }),
       );
-    const country = countries?.[0] ?? text(own) ?? text(options.defaultCountry);
-    if (country === null)
-      throw needsCountry(
-        operation,
-        "Pass one entry in `countries`, or set `defaultCountry` on the adapter.",
-      );
-    return country;
-  }
-
-  /** Runs items through a realtime endpoint, 25 to a request. */
-  async function batch<Item>(
-    operation: "geocode" | "reverse",
-    items: readonly Item[],
-    context: BatchContext,
-    build: (item: Item) => object,
-  ): Promise<AdapterBatchItem[]> {
-    const path = operation === "geocode" ? "/v1/geocode" : "/v1/reverse-geocode";
-    const list = operation === "geocode" ? "addresses" : "locations";
-    const answers: AdapterBatchItem[] = [];
-    const rows: { index: number; body: object }[] = [];
-    items.forEach((item, index) => {
-      try {
-        rows.push({ index, body: { addressId: String(index), ...build(item) } });
-      } catch (error) {
-        answers.push({ index, results: [], error });
-      }
-    });
-    let done = answers.length;
-    const progress = (count: number): void => {
-      done += count;
-      context.onProgress(done, items.length);
     };
-    if (done > 0) progress(0);
-    const chunks = await pool(
-      chunk(rows, BATCH_SIZE),
-      context.concurrency,
-      async (part): Promise<AdapterBatchItem[]> => {
-        const answer = await post<PreciselyResponses>(
-          path,
-          { preferences: preferences(context.request), [list]: part.map((row) => row.body) },
-          context.options,
-        );
-        const responses = answer.data.responses ?? [];
-        const byId = new Map(responses.map((item) => [item.addressId, item]));
-        const settled = part.map((row, position): AdapterBatchItem => {
-          // Answers come back in input order, which stands in when the ID is not echoed.
-          const item =
-            byId.get(String(row.index)) ??
-            (responses[position]?.addressId === undefined ? responses[position] : undefined);
-          if (item === undefined)
-            return {
-              index: row.index,
-              results: [],
-              error: new OgError("Precisely sent no answer for this item.", {
-                provider: "precisely",
-                body: answer.data,
-                requestId: answer.requestId,
-              }),
-            };
-          try {
-            return {
-              index: row.index,
-              results: settle(item, answer, operation, context.request),
-            };
-          } catch (error) {
-            return { index: row.index, results: [], error };
-          }
-        });
-        progress(part.length);
-        return settled;
+    if (signal.aborted) {
+      stop();
+      return;
+    }
+    signal.addEventListener("abort", stop, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
+const json = (
+  rest: Record<string, unknown>,
+  headers: Record<string, string>,
+): Pick<Call, "body" | "headers"> => ({
+  body: JSON.stringify(rest),
+  headers: { "content-type": "application/json", ...headers },
+});
+
+const jobPath = (params: JobParams): string => `/v2/bulk/jobs/${encodeURIComponent(params.jobId)}`;
+
+/**
+ * Builds a client that speaks Precisely's API.
+ * It asks the og server at `baseUrl`, or Precisely itself when only `apiKey` and `apiSecret` are given.
+ */
+export function precisely(options: PreciselyOptions): PreciselyClient {
+  const base = createBase({
+    shape: "precisely",
+    options,
+    baseUrl: options.baseUrl,
+    credentials: options.apiKey !== undefined && options.apiSecret !== undefined,
+    vendorUrl: HOST,
+    cache: CACHE,
+    describeError,
+    // The storage host that takes the uploads and gives the output names its requests under this header.
+    requestIdHeaders: ["x-amz-request-id"],
+    errorCode,
+    positions,
+  });
+  const vendor = base.server !== "og";
+  const basic = vendor ? btoa(`${options.apiKey}:${options.apiSecret}`) : undefined;
+  const realtimeHost =
+    vendor && options.region !== undefined
+      ? `https://api.${options.region}.cloud.precisely.com`
+      : "";
+
+  const exchange = (o: RequestOptions | undefined): Promise<Response> =>
+    base.http({
+      method: "POST",
+      path: "/auth/v2/token",
+      body: "grant_type=client_credentials&scope=default",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...(basic === undefined ? {} : { authorization: `Basic ${basic}` }),
       },
-      (error, part) => {
-        progress(part.length);
-        return part.map((row) => ({ index: row.index, results: [], error }));
-      },
-    );
-    return [...answers, ...chunks.flat()];
+      idempotent: true,
+      options: o,
+    });
+
+  let held: { token: string; until: number } | undefined;
+  let pending: Promise<string> | undefined;
+
+  /** The bearer token, from memory while it lasts. Concurrent callers share one exchange. */
+  function bearer(signal: AbortSignal | undefined): Promise<string> {
+    if (held !== undefined && held.until > Date.now()) return Promise.resolve(held.token);
+    // The exchange runs under the client's own timeout and under no caller's signal,
+    // so one caller giving up does not fail the others that wait for the same token.
+    pending ??= exchange(undefined)
+      .then(async (response) => {
+        const answer = record(await response.json().catch(() => undefined));
+        const token = text(answer?.["access_token"]);
+        if (token === undefined)
+          throw new TokenError("precisely answered the token call without a token.", {
+            status: response.status,
+            headers: response.headers,
+            body: answer,
+            provider: "precisely",
+          });
+        const seconds = answer?.["expires_in"];
+        const lasts = typeof seconds === "number" && seconds > 0 ? seconds * 1000 : 0;
+        held = { token, until: Date.now() + Math.max(0, lasts - RENEW_BEFORE_MS) };
+        return token;
+      })
+      .finally(() => {
+        pending = undefined;
+      });
+    return until(pending, signal);
   }
+
+  /** Sends a call to Precisely with the bearer token, or to og with none. */
+  async function authorized(call: Call): Promise<Response> {
+    if (!vendor) return base.http(call);
+    const signal = call.options?.signal;
+    const withToken = (token: string): Call => ({
+      ...call,
+      headers: { ...call.headers, authorization: `Bearer ${token}` },
+    });
+    const token = await bearer(signal);
+    try {
+      return await base.http(withToken(token));
+    } catch (thrown) {
+      if (!(thrown instanceof OgError) || thrown.status !== 401) throw thrown;
+      // Precisely refused the token before its time, so it is dropped and one fresh token is tried.
+      // Another caller may have replaced it already, and then that newer one is kept.
+      if (held?.token === token) held = undefined;
+      return base.http(withToken(await bearer(signal)));
+    }
+  }
+
+  /** A real-time lookup. It is a POST that only reads, so a retry may repeat it. */
+  const lookup = <T>(
+    method: string,
+    path: string,
+    params: object,
+    request: RequestOptions | undefined,
+    typeAhead = false,
+  ): APIPromise<T> =>
+    base.call<T>({
+      method,
+      args: [params],
+      options: request,
+      send: (o) => {
+        const { headers, rest } = split(params);
+        return authorized({
+          method: "POST",
+          path: `${realtimeHost}${path}`,
+          ...json(rest, headers),
+          idempotent: true,
+          // A retried keystroke is already stale, so a type-ahead call is sent once unless the caller asks for more.
+          options: typeAhead ? { ...o, maxRetries: o?.maxRetries ?? 0 } : o,
+        });
+      },
+    });
+
+  /** A call of the token, file and job flow, which no plugin caches or sends elsewhere. */
+  const job = <T>(
+    step: Pick<Step<T>, "method" | "args" | "options" | "send" | "parse">,
+  ): APIPromise<T> => base.call<T>({ ...step, plugins: false, cache: NEVER });
 
   const submit =
-    (path: string) =>
-    (
-      body: PreciselyBulkRequest,
-      call?: PreciselyBulkOptions,
-    ): APIPromise<PreciselyBulkSubmission> => {
-      const { cassFlow, ...rest } = call ?? {};
-      return bulkRequest<PreciselyBulkSubmission>({
-        ...rest,
-        path,
-        body,
-        ...(cassFlow === undefined
-          ? {}
-          : { headers: { "x-cass-flow": cassFlow, ...rest.headers } }),
+    (method: string, path: string) =>
+    (params: BulkJobParams, request?: RequestOptions): APIPromise<BulkJobResponse> =>
+      job({
+        method,
+        args: [params],
+        options: request,
+        send: (o) => {
+          const { headers, rest } = split(params);
+          // A second submission would start a second job, so this is sent once.
+          return authorized({
+            method: "POST",
+            path,
+            ...json(rest, headers),
+            idempotent: false,
+            options: o,
+          });
+        },
       });
-    };
-
-  const native: PreciselyNative = {
-    request: send,
-    token(call) {
-      if (basic === undefined)
-        throw new OgError(
-          "A Precisely token is issued for an API key and secret, and this adapter has none.",
-          {
-            provider: "precisely",
-          },
-        );
-      return new APIPromise<PreciselyToken>(
-        transport.send({
-          method: "POST",
-          path: `${authBaseUrl}/auth/v2/token`,
-          body: "grant_type=client_credentials&scope=default",
-          headers: {
-            authorization: `Basic ${basic}`,
-            "content-type": "application/x-www-form-urlencoded",
-          },
-          idempotent: true,
-          options: call,
-        }),
-        async (response) => (await response.json()) as PreciselyToken,
-        (response) => transport.requestId(response.headers),
-      );
-    },
-    verify: (body, call) =>
-      send<PreciselyResponses>({ ...call, path: "/v1/verify", body, idempotent: true }),
-    bulk: {
-      uploadUrl: (fileName, call) =>
-        bulkRequest<PreciselyUploadUrl>({
-          ...call,
-          path: "/v2/files/upload-url",
-          body: { fileName },
-        }),
-      upload: (url, content, call) =>
-        new APIPromise<void>(
-          storage.send({
-            method: "PUT",
-            path: url,
-            body: content,
-            // The URL is signed for a content type, and `text/csv` is what Precisely's own uploader sends.
-            headers: { "content-type": call?.contentType ?? "text/csv" },
-            idempotent: true,
-            options: call,
-          }),
-          async () => {},
-        ),
-      geocode: submit("/v2/bulk-geocode"),
-      verify: submit("/v2/bulk-verify"),
-      status: (job, call) =>
-        bulkRequest<PreciselyJobStatus>({ ...call, path: `/v2/bulk/jobs/${jobId(job)}` }),
-      cancel: (job, call) =>
-        bulkRequest<{ jobId: string; message: string }>({
-          ...call,
-          method: "DELETE",
-          path: `/v2/bulk/jobs/${jobId(job)}`,
-          idempotent: true,
-        }),
-      jobs: (status, call) =>
-        bulkRequest<{ jobs: PreciselyQueuedJob[] }>({
-          ...call,
-          path: "/v2/bulk/jobs",
-          query: { status },
-        }),
-      files: (call) =>
-        bulkRequest<{ results: { fileId: string; fileName: string }[] }>({
-          ...call,
-          path: "/v2/files",
-        }),
-      deleteFile: (fileId, call) =>
-        bulkRequest<{ status: string; message: string }>({
-          ...call,
-          method: "DELETE",
-          path: `/v2/files/${encodeURIComponent(fileId)}`,
-          idempotent: true,
-        }),
-    },
-  };
 
   return {
-    id: "precisely",
-    native,
-    capabilities: {
-      geocode: {
-        options: ["limit", "countries", "structured"],
-        fields: [...GEOCODE_FIELDS, "match"],
-      },
-      reverse: { options: ["limit", "countries"], fields: [...GEOCODE_FIELDS, "distance"] },
-      autocomplete: {
-        options: ["limit", "countries", "focus", "session"],
-        fields: [...GEOCODE_FIELDS, "distance", "match", "highlights"],
-        coordinates: true,
-      },
-      lookup: { options: [], fields: GEOCODE_FIELDS },
-      batch: { geocode: true, reverse: true },
-      // What Precisely's terms let a customer keep is not verified, so nothing is kept until it is.
-      cache: { maxTtl: 0 },
-    },
-    async geocode(request, call) {
-      const country = countryOf(request, "geocode", request.address?.country);
-      const answer = await post<PreciselyResponses>(
-        "/v1/geocode",
-        {
-          preferences: preferences(request),
-          addresses: [{ addressId: "0", ...addressInput(request, country) }],
-        },
-        call,
-      );
-      return single(answer, "geocode", request);
-    },
-    async reverse(request, call) {
-      const country = countryOf(request, "reverse");
-      const answer = await post<PreciselyResponses>(
-        "/v1/reverse-geocode",
-        {
-          preferences: preferences(request),
-          locations: [
-            { addressId: "0", longitude: request.point.lon, latitude: request.point.lat, country },
-          ],
-        },
-        call,
-      );
-      return single(answer, "reverse", request);
-    },
-    async autocomplete(request, call) {
-      const country = countryOf(request, "autocomplete");
-      const answer = await post<PreciselyAutocompleteResponse>(
-        "/v1/autocomplete",
-        {
-          preferences: {
-            ...preferences(request),
-            maxResults: request.limit ?? SUGGESTIONS,
-            ...(request.focus === undefined
-              ? {}
-              : { originXY: [request.focus.lon, request.focus.lat] }),
+    shape: base.shape,
+    server: base.server,
+    token: (request) =>
+      job({ method: "token", args: [], options: request, send: (o) => exchange(o) }),
+    geocode: (params, request) => lookup("geocode", "/v1/geocode", params, request),
+    reverseGeocode: (params, request) =>
+      lookup("reverseGeocode", "/v1/reverse-geocode", params, request),
+    lookup: (params, request) => lookup("lookup", "/v1/lookup", params, request),
+    verify: (params, request) => lookup("verify", "/v1/verify", params, request),
+    autocomplete: (params, request) =>
+      lookup("autocomplete", "/v1/autocomplete", params, request, true),
+    expressAutocomplete: (params, request) =>
+      lookup("expressAutocomplete", "/v1/express-autocomplete", params, request, true),
+    expressAutocompleteV2: (params, request) =>
+      lookup("expressAutocompleteV2", "/v2/express-autocomplete", params, request, true),
+    bulk: {
+      uploadUrl: (params, request) =>
+        job({
+          method: "bulk.uploadUrl",
+          args: [params],
+          options: request,
+          send: (o) => {
+            const { headers, rest } = split(params);
+            // Every call answers a new file ID, so a repeat would leave a file nobody uploads to.
+            return authorized({
+              method: "POST",
+              path: "/v2/files/upload-url",
+              ...json(rest, headers),
+              idempotent: false,
+              options: o,
+            });
           },
-          address: { addressLines: [request.query], country },
-        },
-        call,
-        // Precisely rejects a transaction ID that is not a UUID, so any other session is not sent.
-        request.session !== undefined && UUID.test(request.session)
-          ? { "x-transaction-id": request.session }
-          : undefined,
-      );
-      const body = answer.data.response ?? {};
-      if (body.status !== undefined && body.status !== "OK" && body.status !== "ZERO_RESULTS")
-        throw failure(body, answer);
-      return {
-        results: (body.predictions ?? []).map((result) => toPlace(result, "autocomplete", request)),
-        raw: answer.data,
-        response: answer.response,
-        requestId: answer.requestId,
-      };
-    },
-    async lookup(request, call) {
-      const keys: { key: string; type: string; country: string }[] = [];
-      for (const id of request.ids) {
-        const decoded = decodeId(id);
-        // An ID that is not one of ours names no Precisely record.
-        if (decoded === undefined) continue;
-        const country = decoded.country ?? text(options.defaultCountry);
-        if (country === null)
-          throw needsCountry(
-            "lookup",
-            `The ID ${id} names none, so set \`defaultCountry\` on the adapter.`,
-          );
-        keys.push({ key: decoded.key, type: decoded.type, country });
-      }
-      const results: PlaceRecord[] = [];
-      const bodies: PreciselyResponses[] = [];
-      let last: WithResponse<PreciselyResponses> | undefined;
-      for (const part of chunk(keys, BATCH_SIZE)) {
-        last = await post<PreciselyResponses>(
-          "/v1/lookup",
-          { preferences: { returnAllInfo: true }, keys: part },
-          call,
-        );
-        bodies.push(last.data);
-        results.push(...single(last, "lookup", request).results);
-      }
-      return {
-        results,
-        raw: bodies.length === 1 ? bodies[0] : bodies,
-        response: last?.response,
-        requestId: last?.requestId,
-      };
-    },
-    batch: {
-      geocode: (items, context) =>
-        batch("geocode", items, context, (item) =>
-          addressInput(item, countryOf(context.request, "batch.geocode", item.address?.country)),
-        ),
-      reverse: (items, context) =>
-        batch("reverse", items, context, (item) => ({
-          longitude: item.lon,
-          latitude: item.lat,
-          country: countryOf(context.request, "batch.reverse"),
-        })),
-    },
-    errorCode(error) {
-      const first = envelope(error.body);
-      const code = /\((DIS-[A-Z0-9-]+)\)/.exec(text(first?.errorMessage) ?? "")?.[1];
-      return DIS_CODES[code ?? ""] ?? STATUS_CODES[text(first?.status) ?? ""];
+        }),
+      upload: (params, request) =>
+        job<void>({
+          method: "bulk.upload",
+          args: [params],
+          options: request,
+          send: (o) =>
+            base.http({
+              // A signed URL is its own credential, and it points at a storage host and not at Precisely.
+              // That host gets neither the bearer token nor the headers the client was given for Precisely.
+              // og hands out URLs of its own, so there the upload goes the way every request goes.
+              bare: vendor,
+              method: "PUT",
+              path: params.url,
+              body: params.content as BodyInit,
+              headers: { "content-type": params.contentType ?? "text/csv" },
+              idempotent: false,
+              options: o,
+            }),
+          // Neither Precisely's storage nor og answers an upload with a body worth keeping.
+          parse: async (response) => {
+            await response.text();
+          },
+        }),
+      files: (request) =>
+        job({
+          method: "bulk.files",
+          args: [],
+          options: request,
+          send: (o) =>
+            authorized({ method: "GET", path: "/v2/files", idempotent: true, options: o }),
+        }),
+      deleteFile: (params, request) =>
+        job({
+          method: "bulk.deleteFile",
+          args: [params],
+          options: request,
+          send: (o) =>
+            authorized({
+              method: "DELETE",
+              path: `/v2/files/${encodeURIComponent(params.fileId)}`,
+              headers: split(params).headers,
+              idempotent: true,
+              options: o,
+            }),
+        }),
+      geocode: submit("bulk.geocode", "/v2/bulk-geocode"),
+      verify: submit("bulk.verify", "/v2/bulk-verify"),
+      jobs: (params, request) =>
+        job({
+          method: "bulk.jobs",
+          args: [params],
+          options: request,
+          send: (o) => {
+            const { headers, rest } = split(params);
+            return authorized({
+              method: "GET",
+              path: "/v2/bulk/jobs",
+              query: rest,
+              headers,
+              idempotent: true,
+              options: o,
+            });
+          },
+        }),
+      status: (params, request) =>
+        job({
+          method: "bulk.status",
+          args: [params],
+          options: request,
+          send: (o) =>
+            authorized({
+              method: "GET",
+              path: jobPath(params),
+              headers: split(params).headers,
+              idempotent: true,
+              options: o,
+            }),
+        }),
+      cancel: (params, request) =>
+        job({
+          method: "bulk.cancel",
+          args: [params],
+          options: request,
+          send: (o) =>
+            authorized({
+              method: "DELETE",
+              path: jobPath(params),
+              headers: split(params).headers,
+              idempotent: true,
+              options: o,
+            }),
+        }),
+      results: (params, request) =>
+        job<string>({
+          method: "bulk.results",
+          args: [params],
+          options: request,
+          send: (o) =>
+            base.http({
+              bare: vendor,
+              method: "GET",
+              path: params.downloadUrl,
+              headers: { accept: "text/csv" },
+              idempotent: true,
+              options: o,
+            }),
+          parse: (response) => response.text(),
+        }),
     },
   };
 }
