@@ -1194,7 +1194,7 @@ export interface operations {
                  */
                 bbox?: string;
                 /**
-                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. Repeats count once. A malformed code, or more than 20 distinct codes, returns `400`.
                  * @example fr,de
                  */
                 lang?: string;
@@ -1312,7 +1312,7 @@ export interface operations {
                  */
                 country?: string;
                 /**
-                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. Repeats count once. A malformed code, or more than 20 distinct codes, returns `400`.
                  * @example fr,de
                  */
                 lang?: string;
@@ -1968,7 +1968,7 @@ export interface operations {
                  */
                 bbox?: string;
                 /**
-                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. Repeats count once. A malformed code, or more than 20 distinct codes, returns `400`.
                  * @example fr,de
                  */
                 lang?: string;
@@ -2265,7 +2265,7 @@ export interface operations {
                 /** @description Return only the nearest result of this layer, or for an area layer the area of that layer the point lies in, and no other area. An unknown layer returns `400`. */
                 layer?: components["schemas"]["Layer"];
                 /**
-                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. A malformed code returns `400`.
+                 * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. Repeats count once. A malformed code, or more than 20 distinct codes, returns `400`.
                  * @example fr,de
                  */
                 lang?: string;
