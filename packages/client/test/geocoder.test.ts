@@ -3,6 +3,7 @@ import {
   BadRequestError,
   Geocoder,
   GeocoderError,
+  MAX_LANGUAGES,
   OgError,
   type Plugin,
   RateLimitError,
@@ -129,6 +130,39 @@ describe("requests", () => {
       { timeout: 100, maxRetries: 4, signal },
       { timeout: 500, maxRetries: 0 },
     ]);
+  });
+});
+
+const codes = (count: number): string[] =>
+  Array.from({ length: count }, (_, index) => `x-l${index}`);
+
+describe("the language list", () => {
+  it("takes 20 codes and refuses 21 on every operation, before the provider is asked", async () => {
+    const adapter = fakeAdapter("fake", () => ({}));
+    const geo = new Geocoder({ adapter });
+    await geo.geocode("x", { language: codes(MAX_LANGUAGES) });
+    expect(MAX_LANGUAGES).toBe(20);
+    expect(adapter.native.calls).toHaveLength(1);
+
+    const language = codes(21);
+    const point = { lat: 1, lon: 2 };
+    const refused = [
+      geo.geocode("x", { language }),
+      geo.reverse(point, { language }),
+      geo.autocomplete("x", { language }),
+      geo.places("x", { language }),
+      geo.lookup("id", { language }),
+      geo.batch.geocode(["x"], { language }),
+      geo.batch.reverse([point], { language }),
+    ];
+    for (const call of refused) {
+      const error = (await call.catch((thrown: unknown) => thrown)) as GeocoderError;
+      expect(error).toBeInstanceOf(GeocoderError);
+      expect(error.code).toBe("invalid_request");
+      expect(error.message).toBe("language takes at most 20 codes, and 21 were given.");
+      expect(error.provider).toBe("fake");
+    }
+    expect(adapter.native.calls).toHaveLength(1);
   });
 });
 

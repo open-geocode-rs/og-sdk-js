@@ -143,6 +143,23 @@ const CORE_KEYS = [
   "address",
 ] as const;
 
+/**
+ * The most language codes one call may ask for.
+ * Every further language adds a name to each result and to each area around it,
+ * so the list is capped to keep the size of an answer bounded.
+ */
+export const MAX_LANGUAGES = 20;
+
+/** Refuses a request no provider should be sent. */
+function validate(request: BaseRequest, provider: ProviderId, operation: string): void {
+  const count = request.language?.length ?? 0;
+  if (count > MAX_LANGUAGES)
+    throw new GeocoderError(
+      `language takes at most ${MAX_LANGUAGES} codes, and ${count} were given.`,
+      { code: "invalid_request", provider, operation },
+    );
+}
+
 function baseRequest(options: SearchOptions<Include> | undefined): BaseRequest {
   const request: BaseRequest = { include: [...new Set(options?.include)] };
   if (options?.limit !== undefined) request.limit = options.limit;
@@ -336,6 +353,7 @@ export class Geocoder<A extends Adapter = Adapter> {
       },
     };
     try {
+      validate(request, this.adapter.id, operation);
       return await dispatch(0, call);
     } catch (error) {
       throw GeocoderError.from(error, { provider: this.adapter.id, operation });
@@ -356,6 +374,7 @@ export class Geocoder<A extends Adapter = Adapter> {
     const name = `batch.${operation}` as const;
     const base = baseRequest(options as SearchOptions<Include> | undefined);
     const requestOptions = this.#options(options);
+    validate(base, adapter.id, name);
     const concurrency = options?.concurrency ?? 4;
     const fail = (error: unknown): GeocoderError =>
       GeocoderError.from(error, {

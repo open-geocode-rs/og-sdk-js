@@ -13,6 +13,7 @@
  */
 export {
   Geocoder,
+  MAX_LANGUAGES,
   veto,
   type BatchMode,
   type Capabilities,

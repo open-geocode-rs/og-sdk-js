@@ -327,6 +327,7 @@ export interface SearchOptions<I extends Include = never> extends RequestOptions
   /**
    * BCP 47 language codes. The first names the results.
    * Each further one is answered in `translations`, where the provider has it.
+   * At most 20 codes.
    */
   language?: string | readonly string[] | undefined;
   /** Return only results in these countries, as ISO 3166-1 alpha-2 codes. */
