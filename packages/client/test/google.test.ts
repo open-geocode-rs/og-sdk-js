@@ -1,869 +1,663 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { google } from "../src/google.ts";
+import type { Plugin, Position } from "../src/base.ts";
 import {
-  distance,
-  emptyAddress,
-  Geocoder,
-  type GeocoderError,
+  BadRequestError,
+  GeocoderError,
+  InternalServerError,
+  NotFoundError,
   PermissionDeniedError,
-} from "../src/index.ts";
+  RateLimitError,
+} from "../src/errors.ts";
+import { google, type GoogleClient, type GoogleOptions } from "../src/google.ts";
 import autocompleteOrigin from "./fixtures/google/autocomplete-origin.json" with { type: "json" };
 import invalidArgument from "./fixtures/google/error-invalid-argument.json" with { type: "json" };
 import permissionDenied from "./fixtures/google/error-permission-denied.json" with { type: "json" };
 import geocodeAddress from "./fixtures/google/geocode-address.json" with { type: "json" };
 import placeDetailsMoved from "./fixtures/google/place-details-moved.json" with { type: "json" };
 import placeDetails from "./fixtures/google/place-details.json" with { type: "json" };
-import { type Fetch, fakeFetch, urlOf } from "./helpers.ts";
+import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply, urlOf } from "./helpers.ts";
 
 /**
  * A documented example that Google's docs shorten with `...` or `/.../`.
  * The file is the example as printed, and only the elision marks are taken out on load.
  */
-function elided<T>(name: string): T {
+function elided(name: string): Record<string, unknown> {
   const printed = readFileSync(new URL(`./fixtures/google/${name}`, import.meta.url), "utf8");
   return JSON.parse(
     printed.replace(/^\s*(\.\.\.|\/\.\.\.\/)\s*$/gm, "").replace(/,(\s*[\]}])/g, "$1"),
-  ) as T;
+  ) as Record<string, unknown>;
 }
 
-interface WirePoint {
-  latitude: number;
-  longitude: number;
-}
-interface WireResults {
-  results: { location: WirePoint; viewport: { low: WirePoint; high: WirePoint } }[];
-}
+const reverseLocation = elided("reverse-location.txt");
+const autocompleteArt = elided("autocomplete.txt");
+const textSearch = elided("text-search.txt");
+const nearbySearch = elided("nearby-search.txt");
 
-const reverseLocation = elided<WireResults>("reverse-location.txt");
-const autocompleteArt = elided<{ suggestions: unknown[] }>("autocomplete.txt");
-const textSearch = elided<{ places: unknown[] }>("text-search.txt");
-const nearbySearch = elided<{ places: unknown[] }>("nearby-search.txt");
-
-/** Built by hand from the Place reference, since no documented example carries these fields together. */
-const googleplex = {
-  id: "ChIJj61dQgK6j4AR4GeTYWZsKWw",
-  displayName: { text: "Googleplex", languageCode: "en" },
-  types: ["corporate_office", "point_of_interest", "establishment"],
-  primaryType: "corporate_office",
-  primaryTypeDisplayName: { text: "Corporate office", languageCode: "en" },
-  formattedAddress: "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
-  location: { latitude: 37.4220541, longitude: -122.08532419999999 },
-  viewport: {
-    low: { latitude: 37.4209489697085, longitude: -122.08846930000001 },
-    high: { latitude: 37.4236469302915, longitude: -122.0829156 },
-  },
-  addressComponents: [
-    { longText: "Suite 200", shortText: "Suite 200", types: ["subpremise"] },
-    { longText: "1600", shortText: "1600", types: ["street_number"] },
-    { longText: "Amphitheatre Parkway", shortText: "Amphitheatre Pkwy", types: ["route"] },
-    { longText: "Mountain View", shortText: "Mountain View", types: ["locality", "political"] },
-    {
-      longText: "California",
-      shortText: "CA",
-      types: ["administrative_area_level_1", "political"],
-    },
-    { longText: "United States", shortText: "us", types: ["country", "political"] },
-    { longText: "94043", shortText: "94043", types: ["postal_code"] },
-  ],
-  postalAddress: { regionCode: "US", addressLines: ["1600 Amphitheatre Pkwy", "Suite 200"] },
-  plusCode: { globalCode: "849VCWC7+RW", compoundCode: "CWC7+RW Mountain View, CA, USA" },
-  internationalPhoneNumber: "+1 650-253-0000",
-  websiteUri: "https://about.google/",
-  regularOpeningHours: {
-    openNow: true,
-    weekdayDescriptions: ["Monday: Open 24 hours", "Tuesday: Closed"],
-  },
-  currentOpeningHours: { openNow: false },
-  rating: 4.2,
-  userRatingCount: 2594,
-  businessStatus: "OPERATIONAL",
-  timeZone: { id: "America/Los_Angeles" },
-  utcOffsetMinutes: -420,
-  entrances: [{ location: { latitude: 37.422189, longitude: -122.084215 }, tags: ["PREFERRED"] }],
-};
-
+const DAY = 24 * 60 * 60 * 1000;
 const KEY = "test-key";
-const PLACE_MASK =
-  "places.id,places.attributions,places.displayName,places.formattedAddress,places.location,places.types,places.addressComponents";
+const PLACE_ID = "ChIJj61dQgK6j4AR4GeTYWZsKWw";
 
-// Google requires the text `Google Maps`, unchanged and untranslated, wherever its content is shown off a Google map.
-// Source: https://developers.google.com/maps/documentation/geocoding/policies, under attribution requirements.
-const GOOGLE_MAPS = [{ text: "Google Maps", url: null, licence: null }];
-const GEOCODE_MASK =
-  "results.placeId,results.location,results.granularity,results.formattedAddress,results.addressComponents,results.types";
-const SUGGESTION_MASK =
-  "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text,suggestions.placePrediction.structuredFormat.mainText.text,suggestions.placePrediction.types";
+interface Target {
+  /** The server that answers. */
+  server: "google" | "og";
+  options: GoogleOptions;
+  /** Where Places requests go. */
+  places: string;
+  /** Where Geocoding requests go. */
+  geocode: string;
+}
 
-const geocoder = (fetch: typeof globalThis.fetch) =>
-  new Geocoder({ adapter: google({ apiKey: KEY, fetch, logLevel: "off", maxRetries: 0 }) });
+const TARGETS: Target[] = [
+  {
+    server: "google",
+    options: { apiKey: KEY },
+    places: "https://places.googleapis.com",
+    geocode: "https://geocode.googleapis.com",
+  },
+  {
+    server: "og",
+    // The key is given too, to show that og is never sent it.
+    options: { baseUrl: "http://og.test/", apiKey: KEY },
+    places: "http://og.test/compat/google",
+    geocode: "http://og.test/compat/google",
+  },
+];
 
-const init = (fetch: Fetch, call = 0) => fetch.mock.calls[call]![1]!;
-const headers = (fetch: Fetch, call = 0) => init(fetch, call).headers as Record<string, string>;
-const body = (fetch: Fetch, call = 0) => JSON.parse(init(fetch, call).body as string) as unknown;
+function build(
+  target: Target,
+  replies: Reply[],
+  extra: GoogleOptions = {},
+): { client: GoogleClient; fetch: Fetch } {
+  const fetch = fakeFetch(...replies);
+  return {
+    client: google({ ...target.options, fetch, logLevel: "off", ...extra }),
+    fetch,
+  };
+}
 
-const mountainView = {
-  houseNumber: "1600",
-  street: "Amphitheatre Parkway",
-  unit: null,
-  neighbourhood: null,
-  locality: "Mountain View",
-  district: "Santa Clara County",
-  region: "California",
-  regionCode: "CA",
-  postcode: "94043",
-  country: "United States",
-  countryCode: "US",
-};
+function methodOf(fetch: Fetch, call = 0): string | undefined {
+  return fetch.mock.calls[call]![1]?.method;
+}
 
-describe("the google adapter", () => {
-  it("says what it supports", () => {
-    const { capabilities } = geocoder(fakeFetch());
-    expect(capabilities.autocomplete?.coordinates).toBe(false);
-    expect(capabilities.geocode?.options).toEqual(["limit", "language", "types", "structured"]);
-    expect(capabilities.places?.options).toEqual(["limit", "language", "focus", "bounds", "types"]);
-    expect(capabilities.lookup?.options).toEqual(["language", "session"]);
-    expect(capabilities.batch).toEqual({ geocode: "emulated", reverse: "emulated" });
+function hasBody(fetch: Fetch, call = 0): boolean {
+  return fetch.mock.calls[call]![1]?.body !== undefined;
+}
+
+/** The key is in a header for Google, and nowhere for og. */
+function expectCredential(target: Target, fetch: Fetch): void {
+  const url = String(fetch.mock.calls[0]![0]);
+  const headers = headersOf(fetch);
+  expect(url).not.toContain(KEY);
+  expect(urlOf(fetch).searchParams.has("key")).toBe(false);
+  if (target.server === "google") expect(headers["x-goog-api-key"]).toBe(KEY);
+  else {
+    expect(headers).not.toHaveProperty("x-goog-api-key");
+    expect(JSON.stringify(headers)).not.toContain(KEY);
+  }
+}
+
+describe.each(TARGETS)("requests when $server answers", (target) => {
+  it("says which API it speaks and which server answers", () => {
+    const { client } = build(target, [{}]);
+    expect(client.shape).toBe("google");
+    expect(client.server).toBe(target.server);
   });
 
-  describe("geocode", () => {
-    it("sends free text in the path and maps the result", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress });
-      const answer = await geocoder(fetch).geocode("1600 Amphitheatre Parkway, Mountain View, CA", {
-        language: ["en", "fr"],
-        countries: ["us"],
-        focus: { lat: 37.4, lon: -122.1 },
-        include: ["bbox", "addressDetails", "addressLines", "plusCode"],
-      });
-      expect(init(fetch).method).toBe("GET");
-      expect(urlOf(fetch).href).toBe(
-        "https://geocode.googleapis.com/v4/geocode/address/1600%20Amphitheatre%20Parkway%2C%20Mountain%20View%2C%20CA?languageCode=en",
-      );
-      expect(headers(fetch)).toMatchObject({
-        "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask": `${GEOCODE_MASK},results.viewport,results.bounds,results.postalAddress,results.plusCode`,
-      });
-      expect(answer).toEqual({
-        provider: "google",
-        operation: "geocode",
-        results: [
-          {
-            id: "ChIJxQvW8wK6j4AR3ukttGy3w2s",
-            type: "address",
-            name: "1600 Amphitheatre Pkwy",
-            label: "Google Building 41, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
-            location: { lat: 37.4224119, lon: -122.08550779999999 },
-            accuracy: "rooftop",
-            confidence: null,
-            distance: 2801.58,
-            address: mountainView,
-            bbox: [-122.08713963029149, 37.420886519708496, -122.0844416697085, 37.423584480291495],
-            addressDetails: {
-              unitType: null,
-              building: "Google Building 41",
-              floor: null,
-              sublocality: null,
-              postcodeSuffix: "1351",
-            },
-            addressLines: ["1600 Amphitheatre Pkwy"],
-            plusCode: null,
-          },
-        ],
-        attribution: GOOGLE_MAPS,
-        unavailable: ["confidence"],
-        ignored: ["countries", "focus"],
-      });
+  it("places.searchText posts the body and sends the field mask as a header", async () => {
+    const { client, fetch } = build(target, [{ body: textSearch }]);
+    const answer = await client.places.searchText({
+      fieldMask: ["places.displayName", "places.formattedAddress", "places.priceLevel"],
+      textQuery: "vegetarian food in Sydney",
+      languageCode: "en",
+      pageSize: 2,
+      priceLevels: ["PRICE_LEVEL_MODERATE"],
+      locationBias: {
+        circle: { center: { latitude: -33.87, longitude: 151.21 }, radius: 500 },
+      },
+      openNow: undefined,
     });
-
-    it("sends a structured address as address.* parameters", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress });
-      const answer = await geocoder(fetch).geocode({
-        houseNumber: "1600",
-        street: "Amphitheatre Pkwy",
-        locality: "Mountain View",
-        region: "CA",
-        postcode: "94043",
-        country: "us",
-      });
-      expect(urlOf(fetch).href).toBe(
-        "https://geocode.googleapis.com/v4/geocode/address?address.addressLines=1600+Amphitheatre+Pkwy&address.locality=Mountain+View&address.administrativeArea=CA&address.postalCode=94043&address.regionCode=US",
-      );
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe(GEOCODE_MASK);
-      expect(answer.ignored).toEqual([]);
-      expect(answer.results).toHaveLength(1);
+    expect(answer).toEqual(textSearch);
+    expect(methodOf(fetch)).toBe("POST");
+    expect(String(fetch.mock.calls[0]![0])).toBe(`${target.places}/v1/places:searchText`);
+    expect(headersOf(fetch)).toMatchObject({
+      "content-type": "application/json",
+      "x-goog-fieldmask": "places.displayName,places.formattedAddress,places.priceLevel",
     });
-
-    it("sends a country name as the last address line", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress });
-      await geocoder(fetch).geocode({ address: "10 Downing St", country: "United Kingdom" });
-      expect(urlOf(fetch).search).toBe(
-        "?address.addressLines=10+Downing+St&address.addressLines=United+Kingdom",
-      );
+    // The mask travels in the header only, and a parameter left undefined is not sent.
+    expect(bodyOf(fetch)).toEqual({
+      textQuery: "vegetarian food in Sydney",
+      languageCode: "en",
+      pageSize: 2,
+      priceLevels: ["PRICE_LEVEL_MODERATE"],
+      locationBias: {
+        circle: { center: { latitude: -33.87, longitude: 151.21 }, radius: 500 },
+      },
     });
-
-    it("keeps only the types asked for", async () => {
-      const geo = geocoder(fakeFetch({ body: geocodeAddress }));
-      expect((await geo.geocode("x", { types: ["locality"] })).results).toEqual([]);
-      expect((await geo.geocode("x", { types: ["address", "poi"] })).results).toHaveLength(1);
-    });
-
-    it("asks for every field and returns the records untouched with raw", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress });
-      const answer = await geocoder(fetch).geocode("x", { include: ["raw"] });
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe("*");
-      expect(answer.raw).toEqual(geocodeAddress);
-      expect(answer.results[0]!.raw).toEqual(geocodeAddress.results[0]);
-    });
-
-    it("answers nothing for an empty body", async () => {
-      const answer = await geocoder(fakeFetch({ body: {} })).geocode("nowhere at all");
-      expect(answer.results).toEqual([]);
-    });
+    expectCredential(target, fetch);
   });
 
-  describe("reverse", () => {
-    it("sends the point in the path and measures the distance to each result", async () => {
-      const fetch = fakeFetch({ body: reverseLocation });
-      const at = { lat: 37.4225508, lon: -122.0846338 };
-      const answer = await geocoder(fetch).reverse(at, {
-        types: ["address"],
-        include: ["bbox", "plusCode", "rating"],
-      });
-      const wire = reverseLocation.results[0]!;
-      const location = { lat: wire.location.latitude, lon: wire.location.longitude };
-      expect(init(fetch).method).toBe("GET");
-      expect(urlOf(fetch).href).toBe(
-        "https://geocode.googleapis.com/v4/geocode/location/37.4225508,-122.0846338",
-      );
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe(
-        `${GEOCODE_MASK},results.viewport,results.bounds,results.plusCode`,
-      );
-      expect(answer.results).toEqual([
-        {
-          id: "ChIJV-FZF7i7j4ARo4ZOUoecZFU",
-          type: "address",
-          name: "1600 Amphitheatre Pkwy",
-          label: "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
-          location,
-          accuracy: "rooftop",
-          confidence: null,
-          distance: Math.round(distance(at, location) * 100) / 100,
-          address: mountainView,
-          bbox: [
-            wire.viewport.low.longitude,
-            wire.viewport.low.latitude,
-            wire.viewport.high.longitude,
-            wire.viewport.high.latitude,
-          ],
-          plusCode: { global: "849VCW83+PM", compound: "CW83+PM Mountain View, CA, USA" },
-          rating: null,
-        },
-      ]);
-      expect(answer.results[0]!.distance).toBeGreaterThan(4);
-      expect(answer.results[0]!.distance).toBeLessThan(5);
-      expect(answer.unavailable).toEqual(["confidence", "rating"]);
-      expect(answer.ignored).toEqual([]);
+  it("places.autocomplete posts the body, with no field mask unless one is given", async () => {
+    const { client, fetch } = build(target, [{ body: autocompleteOrigin }]);
+    const answer = await client.places.autocomplete({
+      input: "Amoeba",
+      origin: { latitude: 37.76999, longitude: -122.44696 },
+      includedRegionCodes: ["us"],
+      sessionToken: "session-1",
     });
-  });
+    expect(answer).toEqual(autocompleteOrigin);
+    expect(methodOf(fetch)).toBe("POST");
+    expect(String(fetch.mock.calls[0]![0])).toBe(`${target.places}/v1/places:autocomplete`);
+    expect(headersOf(fetch)).not.toHaveProperty("x-goog-fieldmask");
+    expect(headersOf(fetch)["content-type"]).toBe("application/json");
+    expect(bodyOf(fetch)).toEqual({
+      input: "Amoeba",
+      origin: { latitude: 37.76999, longitude: -122.44696 },
+      includedRegionCodes: ["us"],
+      sessionToken: "session-1",
+    });
+    expectCredential(target, fetch);
 
-  describe("autocomplete", () => {
-    it("posts the search and maps place predictions", async () => {
-      const fetch = fakeFetch({ body: autocompleteArt });
-      const answer = await geocoder(fetch).autocomplete("Art museum", {
-        limit: 5,
-        language: "en",
-        countries: ["US", "CA"],
-        bounds: [-122.52, 37.7, -122.35, 37.83],
-        session: "3519edfe-0f75-4a30-bfe4-7cbd89340b2c",
-        include: ["highlights"],
-      });
-      expect(init(fetch).method).toBe("POST");
-      expect(urlOf(fetch).href).toBe("https://places.googleapis.com/v1/places:autocomplete");
-      expect(headers(fetch)).toMatchObject({
-        "content-type": "application/json",
-        "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask": `${SUGGESTION_MASK},suggestions.placePrediction.text.matches`,
-      });
-      expect(body(fetch)).toEqual({
+    const second = build(target, [{ body: autocompleteArt }]);
+    await expect(
+      second.client.places.autocomplete({
         input: "Art museum",
-        languageCode: "en",
-        includedRegionCodes: ["us", "ca"],
-        locationRestriction: {
-          rectangle: {
-            low: { latitude: 37.7, longitude: -122.52 },
-            high: { latitude: 37.83, longitude: -122.35 },
-          },
-        },
-        sessionToken: "3519edfe-0f75-4a30-bfe4-7cbd89340b2c",
-      });
-      expect(answer).toEqual({
-        provider: "google",
-        operation: "autocomplete",
-        results: [
-          {
-            id: "ChIJkQQVTZqAhYARHxPt2iJkm1Q",
-            type: "poi",
-            name: "Asian Art Museum",
-            label: "Asian Art Museum, Larkin Street, San Francisco, CA, USA",
-            location: null,
-            accuracy: null,
-            confidence: null,
-            distance: null,
-            address: emptyAddress(),
-            highlights: [{ start: 6, end: 16 }],
-          },
-          {
-            id: "ChIJI7NivpmAhYARSuRPlbbn_2w",
-            type: "poi",
-            name: "de Young Museum",
-            label: "de Young Museum, Hagiwara Tea Garden Drive, San Francisco, CA, USA",
-            location: null,
-            accuracy: null,
-            confidence: null,
-            distance: null,
-            address: emptyAddress(),
-            highlights: [{ start: 0, end: 15 }],
-          },
-        ],
-        attribution: GOOGLE_MAPS,
-        unavailable: ["location", "accuracy", "confidence", "address"],
-        ignored: [],
-      });
-    });
-
-    it("sends focus as origin and bias, and reads the distance", async () => {
-      const fetch = fakeFetch({ body: autocompleteOrigin });
-      const answer = await geocoder(fetch).autocomplete("Amoeba", {
-        focus: { lat: 37.76999, lon: -122.44696 },
-        types: ["poi"],
-        include: ["raw"],
-      });
-      const origin = { latitude: 37.76999, longitude: -122.44696 };
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe("*");
-      expect(body(fetch)).toEqual({
-        input: "Amoeba",
-        origin,
-        locationBias: { circle: { center: origin, radius: 50000 } },
-      });
-      expect(answer.results).toHaveLength(1);
-      expect(answer.results[0]).toMatchObject({
-        id: "ChIJ5YQQf1GHhYARPKG7WLIaOko",
-        name: "Amoeba Music",
-        distance: 3012,
-        raw: autocompleteOrigin.suggestions[0]!.placePrediction,
-      });
-      expect(answer.raw).toEqual(autocompleteOrigin);
-    });
-
-    it("asks for the distance only with a focus", async () => {
-      const fetch = fakeFetch({ body: autocompleteOrigin });
-      await geocoder(fetch).autocomplete("Amoeba", { focus: { lat: 37.7, lon: -122.4 } });
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe(
-        `${SUGGESTION_MASK},suggestions.placePrediction.distanceMeters`,
-      );
-    });
-
-    it("sends primary types where they read exactly as the unified ones, and filters the answer", async () => {
-      const fetch = fakeFetch({ body: autocompleteOrigin });
-      const geo = geocoder(fetch);
-      const streets = await geo.autocomplete("Haight", { types: ["address", "street"] });
-      expect(body(fetch)).toEqual({
-        input: "Haight",
-        includedPrimaryTypes: ["street_address", "premise", "subpremise", "route"],
-      });
-      expect(streets.results).toEqual([]);
-      expect(streets.ignored).toEqual([]);
-      // Six Google types are one more than the API takes, so only the adapter's own filter applies.
-      await geo.autocomplete("Haight", { types: ["address", "street", "locality"] });
-      expect(body(fetch, 1)).toEqual({ input: "Haight" });
-    });
-
-    it("leaves out suggestions that are not places", async () => {
-      const fetch = fakeFetch({
-        body: { suggestions: [{ queryPrediction: { text: { text: "Amoeba Music" } } }] },
-      });
-      expect((await geocoder(fetch).autocomplete("Amoeba")).results).toEqual([]);
-    });
+        fieldMask: ["suggestions.placePrediction.text.text", "suggestions.placePrediction.placeId"],
+      }),
+    ).resolves.toEqual(autocompleteArt);
+    expect(headersOf(second.fetch)["x-goog-fieldmask"]).toBe(
+      "suggestions.placePrediction.text.text,suggestions.placePrediction.placeId",
+    );
+    expect(bodyOf(second.fetch)).toEqual({ input: "Art museum" });
   });
 
-  describe("places", () => {
-    it("posts a text search with a lean field mask", async () => {
-      const fetch = fakeFetch({ body: textSearch });
-      const answer = await geocoder(fetch).places("Spicy Vegetarian Food in Sydney, Australia", {
-        limit: 1,
-        language: "en",
-        countries: ["AU"],
-        focus: { lat: -33.87, lon: 151.21 },
-      });
-      expect(init(fetch).method).toBe("POST");
-      expect(urlOf(fetch).href).toBe("https://places.googleapis.com/v1/places:searchText");
-      expect(headers(fetch)).toMatchObject({
-        "content-type": "application/json",
-        "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask": PLACE_MASK,
-      });
-      expect(body(fetch)).toEqual({
-        textQuery: "Spicy Vegetarian Food in Sydney, Australia",
-        languageCode: "en",
-        pageSize: 1,
-        locationBias: {
-          circle: { center: { latitude: -33.87, longitude: 151.21 }, radius: 50000 },
-        },
-      });
-      expect(answer).toEqual({
-        provider: "google",
-        operation: "places",
-        results: [
-          {
-            id: null,
-            type: "unknown",
-            name: "Mother Chu's Vegetarian Kitchen",
-            label: "367 Pitt St, Sydney NSW 2000, Australia",
-            location: null,
-            accuracy: null,
-            confidence: null,
-            distance: null,
-            address: emptyAddress(),
-          },
-        ],
-        attribution: GOOGLE_MAPS,
-        unavailable: ["accuracy", "confidence"],
-        ignored: ["countries"],
-      });
+  it("places.get puts the resource name in the path and the rest in the query", async () => {
+    const { client, fetch } = build(target, [{ body: placeDetails }]);
+    const answer = await client.places.get({
+      name: `places/${PLACE_ID}`,
+      fieldMask: ["id", "displayName", "formattedAddress", "plusCode"],
+      languageCode: "en",
+      regionCode: "us",
+      sessionToken: "session-1",
     });
-
-    it("sends bounds as a restriction and maps entrances and navigation points", async () => {
-      const fetch = fakeFetch({ body: nearbySearch });
-      const answer = await geocoder(fetch).places("SFO", {
-        limit: 50,
-        bounds: [-122.5, 37.5, -122.3, 37.7],
-        focus: { lat: 37.6, lon: -122.4 },
-        include: ["accessPoints"],
-      });
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe(
-        `${PLACE_MASK},places.entrances,places.navigationPoints`,
-      );
-      expect(body(fetch)).toEqual({
-        textQuery: "SFO",
-        pageSize: 20,
-        locationRestriction: {
-          rectangle: {
-            low: { latitude: 37.5, longitude: -122.5 },
-            high: { latitude: 37.7, longitude: -122.3 },
-          },
-        },
-      });
-      expect(answer.results).toEqual([
-        {
-          id: "ChIJVVVVVYx3j4ARP-3NGldc8qQ",
-          type: "unknown",
-          name: "San Francisco International Airport",
-          label: "San Francisco International Airport",
-          location: null,
-          accuracy: null,
-          confidence: null,
-          distance: null,
-          address: emptyAddress(),
-          accessPoints: [
-            { lat: 37.6172154, lon: -122.3839724, kind: null },
-            { lat: 37.6174073, lon: -122.384196, kind: null },
-            { lat: 37.6153121, lon: -122.3900833, kind: null },
-            { lat: 37.6157153, lon: -122.3885012, kind: "PARKING" },
-          ],
-        },
-      ]);
-    });
-
-    it("takes the whole page when it filters by type, and measures from the focus", async () => {
-      const fetch = fakeFetch({ body: { places: [googleplex] } });
-      const focus = { lat: 37.42, lon: -122.08 };
-      const geo = geocoder(fetch);
-      const answer = await geo.places("Googleplex", { limit: 1, types: ["poi"], focus });
-      expect(body(fetch)).not.toHaveProperty("pageSize");
-      expect(answer.results[0]!.distance).toBe(522.72);
-      expect((await geo.places("Googleplex", { types: ["locality"] })).results).toEqual([]);
-    });
+    expect(answer).toEqual(placeDetails);
+    expect(methodOf(fetch)).toBe("GET");
+    expect(hasBody(fetch)).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.places}/v1/places/${PLACE_ID}?languageCode=en&regionCode=us&sessionToken=session-1`,
+    );
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe("id,displayName,formattedAddress,plusCode");
+    expectCredential(target, fetch);
   });
 
-  describe("lookup", () => {
-    it("gets one place per id and fills every field asked for", async () => {
-      const fetch = fakeFetch({ body: googleplex });
-      const answer = await geocoder(fetch).lookup(googleplex.id, {
-        language: "en",
-        session: "3519edfe-0f75-4a30-bfe4-7cbd89340b2c",
-        include: [
-          "bbox",
-          "addressDetails",
-          "addressLines",
-          "categories",
-          "contact",
-          "openingHours",
-          "rating",
-          "businessStatus",
-          "timezone",
-          "accessPoints",
-          "plusCode",
-          "brand",
-        ],
-      });
-      expect(init(fetch).method).toBe("GET");
-      expect(urlOf(fetch).href).toBe(
-        "https://places.googleapis.com/v1/places/ChIJj61dQgK6j4AR4GeTYWZsKWw?languageCode=en&sessionToken=3519edfe-0f75-4a30-bfe4-7cbd89340b2c",
-      );
-      expect(headers(fetch)).toMatchObject({
-        "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask":
-          "id,attributions,displayName,formattedAddress,location,types,addressComponents,viewport,postalAddress,primaryType,primaryTypeDisplayName,internationalPhoneNumber,websiteUri,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,rating,userRatingCount,businessStatus,timeZone,utcOffsetMinutes,entrances,navigationPoints,plusCode",
-      });
-      expect(answer).toEqual({
-        provider: "google",
-        operation: "lookup",
-        results: [
-          {
-            id: "ChIJj61dQgK6j4AR4GeTYWZsKWw",
-            type: "poi",
-            name: "Googleplex",
-            label: "Googleplex, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
-            location: { lat: 37.4220541, lon: -122.08532419999999 },
-            accuracy: null,
-            confidence: null,
-            distance: null,
-            address: { ...mountainView, unit: "Suite 200", district: null },
-            bbox: [-122.08846930000001, 37.4209489697085, -122.0829156, 37.4236469302915],
-            addressDetails: {
-              unitType: null,
-              building: null,
-              floor: null,
-              sublocality: null,
-              postcodeSuffix: null,
-            },
-            addressLines: ["1600 Amphitheatre Pkwy", "Suite 200"],
-            categories: [
-              { id: "corporate_office", name: "Corporate office", primary: true },
-              { id: "point_of_interest", name: null, primary: false },
-              { id: "establishment", name: null, primary: false },
-            ],
-            contact: { phone: "+1 650-253-0000", website: "https://about.google/", email: null },
-            openingHours: {
-              text: ["Monday: Open 24 hours", "Tuesday: Closed"],
-              openNow: false,
-            },
-            rating: { value: 4.2, count: 2594 },
-            businessStatus: "operational",
-            timezone: { name: "America/Los_Angeles", utcOffsetMinutes: -420 },
-            accessPoints: [{ lat: 37.422189, lon: -122.084215, kind: "PREFERRED" }],
-            plusCode: { global: "849VCWC7+RW", compound: "CWC7+RW Mountain View, CA, USA" },
-            brand: null,
-          },
-        ],
-        attribution: GOOGLE_MAPS,
-        unavailable: ["accuracy", "confidence", "distance", "brand"],
-        ignored: [],
-      });
-    });
-
-    it("maps the documented details example", async () => {
-      const fetch = fakeFetch({ body: placeDetails });
-      const answer = await geocoder(fetch).lookup(placeDetails.id, {
-        include: ["plusCode", "raw"],
-      });
-      expect(urlOf(fetch).href).toBe(
-        "https://places.googleapis.com/v1/places/ChIJj61dQgK6j4AR4GeTYWZsKWw",
-      );
-      expect(headers(fetch)["X-Goog-FieldMask"]).toBe("*");
-      expect(answer.results).toEqual([
-        {
-          id: "ChIJj61dQgK6j4AR4GeTYWZsKWw",
-          type: "unknown",
-          name: "Googleplex",
-          label: "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
-          location: null,
-          accuracy: null,
-          confidence: null,
-          distance: null,
-          address: emptyAddress(),
-          plusCode: { global: "849VCWC7+RW", compound: "CWC7+RW Mountain View, CA, USA" },
-          raw: placeDetails,
-        },
-      ]);
-      expect(answer.raw).toEqual([placeDetails]);
-    });
-
-    it("reads the business status of a place that moved", async () => {
-      const fetch = fakeFetch({ body: placeDetailsMoved });
-      const answer = await geocoder(fetch).lookup(placeDetailsMoved.id, {
-        include: ["businessStatus"],
-      });
-      expect(answer.results[0]).toMatchObject({
-        name: "Marche IGA St-Canut",
-        businessStatus: "closed_permanently",
-      });
-    });
-
-    it("answers nothing for an id Google does not know", async () => {
-      const gone = {
-        status: 404,
-        body: { error: { code: 404, message: "Place not found.", status: "NOT_FOUND" } },
-      };
-      expect((await geocoder(fakeFetch(gone)).lookup("gone")).results).toEqual([]);
-      const fetch = fakeFetch(gone, { body: placeDetails });
-      const answer = await geocoder(fetch).lookup(["gone", placeDetails.id]);
-      expect(fetch).toHaveBeenCalledTimes(2);
-      expect(answer.results.map((place) => place.id)).toEqual([placeDetails.id]);
-    });
-
-    it("fails when a request fails for any other reason", async () => {
-      const fetch = fakeFetch({ body: placeDetails }, { status: 400, body: invalidArgument });
-      const error = await geocoder(fetch)
-        .lookup([placeDetails.id, "bad"])
-        .catch((thrown: unknown) => thrown as GeocoderError);
-      expect(error).toMatchObject({ code: "invalid_request", operation: "lookup" });
-    });
+  it("places.get returns a moved place as it came", async () => {
+    const { client, fetch } = build(target, [{ body: placeDetailsMoved }]);
+    await expect(
+      client.places.get({ name: "places/ChIJUfQdGInVzkwRzAjmjzWB7CQ", fieldMask: ["*"] }),
+    ).resolves.toEqual(placeDetailsMoved);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.places}/v1/places/ChIJUfQdGInVzkwRzAjmjzWB7CQ`,
+    );
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe("*");
   });
 
-  describe("errors", () => {
-    it("reads the message and the code from Google's error body", async () => {
-      const fetch = fakeFetch({ status: 403, body: permissionDenied });
-      const error = (await geocoder(fetch)
-        .geocode("x")
-        .catch((thrown: unknown) => thrown)) as GeocoderError;
-      expect(error).toMatchObject({
-        name: "GeocoderError",
-        code: "permission_denied",
-        message: "The request is missing a valid API key.",
-        provider: "google",
-        operation: "geocode",
-        status: 403,
-        body: permissionDenied,
-      });
-      expect(error.cause).toBeInstanceOf(PermissionDeniedError);
-      expect((error.cause as PermissionDeniedError).body).toEqual(permissionDenied);
-    });
-
-    it("maps the documented invalid argument body", async () => {
-      const fetch = fakeFetch({ status: 400, body: invalidArgument });
-      const error = (await geocoder(fetch)
-        .places("x")
-        .catch((thrown: unknown) => thrown)) as GeocoderError;
-      expect(error).toMatchObject({
-        code: "invalid_request",
-        message: "Origin and destination must be set.",
-      });
-    });
-
-    it.each([
-      [429, "RESOURCE_EXHAUSTED", "rate_limited"],
-      // The cases below are the ones the HTTP status alone would misread.
-      [403, "RESOURCE_EXHAUSTED", "rate_limited"],
-      [500, "UNIMPLEMENTED", "unsupported"],
-      [504, "DEADLINE_EXCEEDED", "timeout"],
-      [500, "UNAVAILABLE", "unavailable"],
-      [400, "UNAUTHENTICATED", "unauthenticated"],
-    ])("reads HTTP %i with status %s as %s", async (status, name, code) => {
-      const fetch = fakeFetch({
-        status,
-        body: { error: { code: status, message: "No.", status: name } },
-      });
-      const error = (await geocoder(fetch)
-        .reverse({ lat: 1, lon: 2 })
-        .catch((thrown: unknown) => thrown)) as GeocoderError;
-      expect(error.code).toBe(code);
-      expect(error.message).toBe("No.");
-    });
-
-    it("reads a rejected key as unauthenticated", async () => {
-      const fetch = fakeFetch({
-        status: 400,
-        body: {
-          error: {
-            code: 400,
-            message: "API key not valid. Please pass a valid API key.",
-            status: "INVALID_ARGUMENT",
-            details: [
-              { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID" },
-            ],
-          },
-        },
-      });
-      const error = (await geocoder(fetch)
-        .geocode("x")
-        .catch((thrown: unknown) => thrown)) as GeocoderError;
-      expect(error.code).toBe("unauthenticated");
-    });
-
-    it("falls back to the HTTP status when the body is not Google's", async () => {
-      const fetch = fakeFetch({ status: 502, body: "<html>Bad Gateway</html>" });
-      const error = (await geocoder(fetch)
-        .geocode("x")
-        .catch((thrown: unknown) => thrown)) as GeocoderError;
-      expect(error.code).toBe("unavailable");
-    });
-  });
-
-  describe("batch", () => {
-    it("emulates a geocode batch with single calls", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress });
-      const answer = await geocoder(fetch).batch.geocode([
-        "1600 Amphitheatre Parkway",
-        { id: "b", address: { address: "1600 Amphitheatre Pkwy", locality: "Mountain View" } },
-      ]);
-      expect(fetch).toHaveBeenCalledTimes(2);
-      expect(answer.mode).toBe("emulated");
-      expect(answer.summary).toEqual({ total: 2, succeeded: 2, failed: 0 });
-      expect(answer.items.map((item) => [item.id, item.results[0]!.id])).toEqual([
-        [null, "ChIJxQvW8wK6j4AR3ukttGy3w2s"],
-        ["b", "ChIJxQvW8wK6j4AR3ukttGy3w2s"],
-      ]);
-      expect(answer.unavailable).toEqual(["confidence", "distance"]);
-    });
-
-    it("emulates a reverse batch and keeps a failed item apart", async () => {
-      const fetch = fakeFetch({ body: reverseLocation }, { status: 400, body: invalidArgument });
-      const answer = await geocoder(fetch).batch.reverse(
-        [
-          { lat: 37.4225508, lon: -122.0846338 },
-          { lat: 91, lon: 0 },
-        ],
-        { concurrency: 1 },
-      );
-      expect(answer.mode).toBe("emulated");
-      expect(answer.summary).toEqual({ total: 2, succeeded: 1, failed: 1 });
-      expect(answer.items[1]!.error).toMatchObject({ code: "invalid_request" });
-    });
-  });
-
-  describe("native", () => {
-    it("reaches Places with the key applied", async () => {
-      const fetch = fakeFetch({ body: nearbySearch });
-      const search = {
-        locationRestriction: {
-          circle: { center: { latitude: 37.6, longitude: -122.4 }, radius: 500 },
-        },
-      };
-      const answer = await geocoder(fetch).native.places<{ places: unknown[] }>({
-        path: "/v1/places:searchNearby",
-        body: search,
-        headers: { "X-Goog-FieldMask": "places.id" },
-      });
-      expect(init(fetch).method).toBe("POST");
-      expect(urlOf(fetch).href).toBe("https://places.googleapis.com/v1/places:searchNearby");
-      expect(headers(fetch)).toMatchObject({
-        "X-Goog-Api-Key": KEY,
-        "X-Goog-FieldMask": "places.id",
-      });
-      expect(body(fetch)).toEqual(search);
-      expect(answer.places).toHaveLength(1);
-    });
-
-    it("reaches Geocoding with the key applied", async () => {
-      const fetch = fakeFetch({ body: geocodeAddress.results[0] });
-      const answer = await geocoder(fetch).native.geocoding<{ placeId: string }>({
-        path: "/v4/geocode/places/ChIJxQvW8wK6j4AR3ukttGy3w2s",
-        query: { languageCode: "en" },
-      });
-      expect(init(fetch).method).toBe("GET");
-      expect(urlOf(fetch).href).toBe(
-        "https://geocode.googleapis.com/v4/geocode/places/ChIJxQvW8wK6j4AR3ukttGy3w2s?languageCode=en",
-      );
-      expect(headers(fetch)["X-Goog-Api-Key"]).toBe(KEY);
-      expect(answer.placeId).toBe("ChIJxQvW8wK6j4AR3ukttGy3w2s");
-    });
-
-    it("sends each API to the base URL it was given", async () => {
-      const fetch = fakeFetch({ body: {} });
-      const geo = new Geocoder({
-        adapter: google({
-          apiKey: KEY,
-          fetch,
-          logLevel: "off",
-          placesBaseUrl: "http://proxy.test/places/",
-          geocodingBaseUrl: "http://proxy.test/geocode/",
-          headers: { "x-gateway": "yes" },
-        }),
-      });
-      await geo.places("x");
-      await geo.geocode("x");
-      expect(urlOf(fetch, 0).href).toBe("http://proxy.test/places/v1/places:searchText");
-      expect(urlOf(fetch, 1).href).toBe("http://proxy.test/geocode/v4/geocode/address/x");
-      expect(headers(fetch, 1)).toMatchObject({ "x-gateway": "yes", "X-Goog-Api-Key": KEY });
-    });
-  });
-});
-
-const live = () =>
-  new Geocoder({ adapter: google({ apiKey: process.env.GOOGLE_MAPS_API_KEY ?? "" }) });
-
-describe("the google adapter, inside Google's terms", () => {
-  it("credits each data provider Google names for a place, after Google itself", async () => {
-    // Google's `attributions` on a place lists the data providers to credit with it.
-    // The two below are made up, in the documented shape `{ provider, providerUri }`.
-    const credited = [
-      {
-        ...googleplex,
-        attributions: [{ provider: "Harrowmere Transit", providerUri: "https://transit.example/" }],
+  it("places.searchNearby posts the body and sends the field mask as a header", async () => {
+    const { client, fetch } = build(target, [{ body: nearbySearch }]);
+    const params = {
+      fieldMask: ["places.id", "places.displayName", "places.entrances"],
+      locationRestriction: {
+        circle: { center: { latitude: 37.6213, longitude: -122.379 }, radius: 1000 },
       },
-      {
-        ...googleplex,
-        id: "second",
-        attributions: [{ provider: "Harrowmere Transit" }, { provider: "Quillfield Survey" }],
+      includedTypes: ["airport"],
+      maxResultCount: 1,
+      rankPreference: "DISTANCE",
+    } as const;
+    const answer = await client.places.searchNearby(params);
+    expect(answer).toEqual(nearbySearch);
+    expect(methodOf(fetch)).toBe("POST");
+    expect(String(fetch.mock.calls[0]![0])).toBe(`${target.places}/v1/places:searchNearby`);
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe(
+      "places.id,places.displayName,places.entrances",
+    );
+    const { fieldMask: _mask, ...body } = params;
+    expect(bodyOf(fetch)).toEqual(body);
+    expectCredential(target, fetch);
+  });
+
+  it("geocode.address puts the address text in the path", async () => {
+    const { client, fetch } = build(target, [{ body: geocodeAddress }]);
+    const answer = await client.geocode.address({
+      addressQuery: "1600 Amphitheatre Parkway, Mountain View, CA",
+      languageCode: "en",
+      regionCode: "us",
+      locationBias: {
+        rectangle: {
+          low: { latitude: 36.47, longitude: -84.72 },
+          high: { latitude: 43.39, longitude: -65.9 },
+        },
       },
-    ];
-    const answer = await geocoder(fakeFetch({ body: { places: credited } })).places("Googleplex");
-    expect(answer.attribution).toEqual([
-      ...GOOGLE_MAPS,
-      { text: "Harrowmere Transit", url: null, licence: null },
-      { text: "Quillfield Survey", url: null, licence: null },
+      fieldMask: ["results.placeId", "results.location"],
+    });
+    expect(answer).toEqual(geocodeAddress);
+    expect(methodOf(fetch)).toBe("GET");
+    expect(hasBody(fetch)).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/address/1600%20Amphitheatre%20Parkway,%20Mountain%20View,%20CA` +
+        "?languageCode=en&regionCode=us" +
+        "&locationBias.rectangle.low.latitude=36.47&locationBias.rectangle.low.longitude=-84.72" +
+        "&locationBias.rectangle.high.latitude=43.39&locationBias.rectangle.high.longitude=-65.9",
+    );
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe("results.placeId,results.location");
+    expectCredential(target, fetch);
+  });
+
+  it("geocode.address encodes what would break a path segment", async () => {
+    const { client, fetch } = build(target, [{ body: {} }]);
+    await client.geocode.address({ addressQuery: "849VCWC8+R4" });
+    await client.geocode.address({ addressQuery: "1/2 Main St #4?" });
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/address/849VCWC8%2BR4`,
+    );
+    expect(String(fetch.mock.calls[1]![0])).toBe(
+      `${target.geocode}/v4/geocode/address/1%2F2%20Main%20St%20%234%3F`,
+    );
+    expect(headersOf(fetch)).not.toHaveProperty("x-goog-fieldmask");
+  });
+
+  it("geocode.address sends a text that cannot be a path segment in the query", async () => {
+    const { client, fetch } = build(target, [{ body: {} }]);
+    await client.geocode.address({ addressQuery: "..", regionCode: "mc" });
+    await client.geocode.address({ addressQuery: "" });
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/address?addressQuery=..&regionCode=mc`,
+    );
+    expect(String(fetch.mock.calls[1]![0])).toBe(
+      `${target.geocode}/v4/geocode/address?addressQuery=`,
+    );
+  });
+
+  it("geocode.address sends an address in parts as dotted parameters", async () => {
+    const { client, fetch } = build(target, [{ body: geocodeAddress }]);
+    await client.geocode.address({
+      address: {
+        addressLines: ["1600 Amphitheatre Pkwy", "Building 41"],
+        locality: "Mountain View",
+        administrativeArea: "CA",
+        postalCode: "94043",
+        regionCode: "US",
+      },
+      languageCode: "en",
+    });
+    expect(methodOf(fetch)).toBe("GET");
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/address` +
+        "?address.addressLines=1600+Amphitheatre+Pkwy&address.addressLines=Building+41" +
+        "&address.locality=Mountain+View&address.administrativeArea=CA" +
+        "&address.postalCode=94043&address.regionCode=US&languageCode=en",
+    );
+    expectCredential(target, fetch);
+  });
+
+  it("geocode.location puts the point in the path and repeats the keys of a list", async () => {
+    const { client, fetch } = build(target, [{ body: reverseLocation }]);
+    const answer = await client.geocode.location({
+      locationQuery: "37.4225508,-122.0846338",
+      languageCode: "en",
+      types: ["street_address", "locality"],
+      granularity: ["ROOFTOP", "GEOMETRIC_CENTER"],
+      fieldMask: ["results.formattedAddress", "plusCode"],
+    });
+    expect(answer).toEqual(reverseLocation);
+    expect(methodOf(fetch)).toBe("GET");
+    expect(hasBody(fetch)).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/location/37.4225508,-122.0846338` +
+        "?languageCode=en&types=street_address&types=locality" +
+        "&granularity=ROOFTOP&granularity=GEOMETRIC_CENTER",
+    );
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe("results.formattedAddress,plusCode");
+    expectCredential(target, fetch);
+  });
+
+  it("geocode.location sends a point in parts as dotted parameters", async () => {
+    const { client, fetch } = build(target, [{ body: reverseLocation }]);
+    await client.geocode.location({
+      location: { latitude: 37.4225508, longitude: -122.0846338 },
+      regionCode: "us",
+    });
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/location` +
+        "?location.latitude=37.4225508&location.longitude=-122.0846338&regionCode=us",
+    );
+  });
+
+  it("geocode.place puts the resource name in the path", async () => {
+    const result = (geocodeAddress.results as unknown[])[0];
+    const { client, fetch } = build(target, [{ body: result }]);
+    const answer = await client.geocode.place({
+      place: `places/${PLACE_ID}`,
+      languageCode: "en",
+      regionCode: "us",
+      fieldMask: ["formattedAddress", "location"],
+    });
+    expect(answer).toEqual(result);
+    expect(methodOf(fetch)).toBe("GET");
+    expect(hasBody(fetch)).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.geocode}/v4/geocode/places/${PLACE_ID}?languageCode=en&regionCode=us`,
+    );
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe("formattedAddress,location");
+    expectCredential(target, fetch);
+  });
+
+  it("refuses a resource name that is not one, before any request", async () => {
+    const { client, fetch } = build(target, [{ body: {} }]);
+    for (const name of [PLACE_ID, "places/", "places/..", "places/a//b", "other/abc"]) {
+      const failed = await client.places.get({ name, fieldMask: ["id"] }).catch((e: unknown) => e);
+      expect(failed).toBeInstanceOf(GeocoderError);
+      expect(failed).toMatchObject({ code: "invalid_request", operation: "places.get" });
+    }
+    await expect(client.geocode.place({ place: "places/../address" })).rejects.toMatchObject({
+      code: "invalid_request",
+      operation: "geocode.place",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("lets the headers of one call replace the field mask", async () => {
+    const { client, fetch } = build(target, [{ body: {} }]);
+    await client.places.searchText(
+      { textQuery: "casino", fieldMask: ["places.id"] },
+      { headers: { "X-Goog-FieldMask": "*", "Accept-Language": "fr" } },
+    );
+    expect(headersOf(fetch)).toMatchObject({ "x-goog-fieldmask": "*", "accept-language": "fr" });
+  });
+
+  it("says how long an answer may be kept", async () => {
+    const { client } = build(target, [{ body: geocodeAddress, headers: { "x-request-id": "r1" } }]);
+    const outcome = await client.geocode.address({ addressQuery: "Googleplex" }).withResponse();
+    expect(outcome.server).toBe(target.server);
+    expect(outcome.data).toEqual(geocodeAddress);
+    expect(outcome.requestId).toBe("r1");
+    expect(outcome.response?.status).toBe(200);
+    // Google's answers may be kept 30 days, and og's without limit.
+    expect(outcome.cache).toEqual({ maxTtl: target.server === "og" ? Infinity : 30 * DAY });
+
+    const search = build(target, [{ body: textSearch }]);
+    const found = await search.client.places
+      .searchText({ textQuery: "x", fieldMask: ["*"] })
+      .withResponse();
+    expect(found.cache).toEqual({ maxTtl: target.server === "og" ? Infinity : 30 * DAY });
+  });
+
+  it("maps an error answer to a GeocoderError with the transport error as its cause", async () => {
+    const { client } = build(target, [
+      { status: 403, body: permissionDenied, headers: { "x-request-id": "req-403" } },
     ]);
+    const failed = (await client.places
+      .get({ name: `places/${PLACE_ID}`, fieldMask: ["id"] })
+      .catch((e: unknown) => e)) as GeocoderError;
+    expect(failed).toBeInstanceOf(GeocoderError);
+    expect(failed).toMatchObject({
+      code: "permission_denied",
+      status: 403,
+      provider: target.server,
+      operation: "places.get",
+      requestId: "req-403",
+      message: "The request is missing a valid API key.",
+      body: permissionDenied,
+    });
+    expect(failed.cause).toBeInstanceOf(PermissionDeniedError);
+    expect(failed.cause).toMatchObject({ status: 403, body: permissionDenied });
+    expect((failed.cause as PermissionDeniedError).headers?.get("x-request-id")).toBe("req-403");
   });
 
-  it("lets a cache keep an answer for 30 days and no longer", () => {
-    // Google lets latitude and longitude be kept for up to 30 consecutive calendar days.
-    // Source: https://developers.google.com/maps/documentation/geocoding/policies, under caching.
-    const { capabilities } = geocoder(fakeFetch({ body: {} }));
-    expect(capabilities.cache).toEqual({ maxTtl: 30 * 24 * 60 * 60 * 1000 });
-    for (const operation of ["geocode", "reverse", "autocomplete", "places", "lookup"] as const)
-      expect(capabilities[operation]?.cache).toBeUndefined();
+  it("reads the error by its status name, where the HTTP status alone would misread it", async () => {
+    const cases: [Reply, Partial<GeocoderError>, unknown][] = [
+      [{ status: 400, body: invalidArgument }, { code: "invalid_request" }, BadRequestError],
+      [
+        {
+          status: 400,
+          body: {
+            error: {
+              code: 400,
+              message: "API key not valid. Please pass a valid API key.",
+              status: "INVALID_ARGUMENT",
+              details: [
+                { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID" },
+              ],
+            },
+          },
+        },
+        { code: "unauthenticated", message: "API key not valid. Please pass a valid API key." },
+        BadRequestError,
+      ],
+      [
+        { status: 404, body: { error: { code: 404, message: "Gone.", status: "NOT_FOUND" } } },
+        { code: "not_found" },
+        NotFoundError,
+      ],
+      [
+        {
+          status: 429,
+          body: { error: { code: 429, message: "Quota.", status: "RESOURCE_EXHAUSTED" } },
+        },
+        { code: "rate_limited", retryable: true },
+        RateLimitError,
+      ],
+      [
+        {
+          status: 504,
+          body: { error: { code: 504, message: "Late.", status: "DEADLINE_EXCEEDED" } },
+        },
+        { code: "timeout" },
+        InternalServerError,
+      ],
+      [
+        {
+          status: 501,
+          body: { error: { code: 501, message: "Not here.", status: "UNIMPLEMENTED" } },
+        },
+        { code: "unsupported" },
+        InternalServerError,
+      ],
+      // A body that is not Google's envelope falls back on the HTTP status.
+      [{ status: 501, body: "nope" }, { code: "unsupported" }, InternalServerError],
+      [{ status: 503, body: {} }, { code: "unavailable" }, InternalServerError],
+    ];
+    for (const [reply, expected, cause] of cases) {
+      const { client } = build(target, [reply], { maxRetries: 0 });
+      const failed = (await client.places
+        .searchNearby({
+          fieldMask: ["places.id"],
+          locationRestriction: { circle: { center: { latitude: 1, longitude: 2 }, radius: 3 } },
+        })
+        .catch((e: unknown) => e)) as GeocoderError;
+      expect(failed).toBeInstanceOf(GeocoderError);
+      expect(failed).toMatchObject({
+        ...expected,
+        status: reply.status,
+        provider: target.server,
+        operation: "places.searchNearby",
+      });
+      expect(failed.cause).toBeInstanceOf(cause);
+    }
+  });
+
+  it("does not retry a keystroke, and retries a search", async () => {
+    const down: Reply = { status: 503, body: {}, headers: { "retry-after-ms": "1" } };
+    const typed = build(target, [down, { body: autocompleteOrigin }]);
+    await expect(typed.client.places.autocomplete({ input: "amo" })).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(typed.fetch).toHaveBeenCalledTimes(1);
+
+    const asked = build(target, [down, { body: autocompleteOrigin }]);
+    await expect(
+      asked.client.places.autocomplete({ input: "amo" }, { maxRetries: 1 }),
+    ).resolves.toEqual(autocompleteOrigin);
+    expect(asked.fetch).toHaveBeenCalledTimes(2);
+
+    const search = build(target, [down, { body: textSearch }]);
+    await expect(
+      search.client.places.searchText({ textQuery: "x", fieldMask: ["places.id"] }),
+    ).resolves.toEqual(textSearch);
+    expect(search.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives plugins the points of an answer, in order", async () => {
+    const seen: Record<string, Position[]> = {};
+    const spy: Plugin = {
+      name: "spy",
+      async handle(call, next) {
+        const outcome = await next();
+        seen[call.method] = call.positions(outcome.data);
+        return outcome;
+      },
+    };
+    const places = {
+      places: [
+        { id: "a", location: { latitude: 43.7391605, longitude: 7.428023 } },
+        // A place with no location, such as a business that only visits its customers.
+        { id: "b" },
+        // proto3 JSON leaves out a coordinate that is zero.
+        { id: "c", location: { latitude: 5.5 } },
+      ],
+    };
+    const results = {
+      results: [
+        { placeId: "a", location: { latitude: 43.7377547, longitude: 7.4270688 } },
+        { placeId: "b", location: { latitude: 43.7403136, longitude: 7.4260731 } },
+      ],
+    };
+    const one = { id: "a", location: { latitude: 43.7391605, longitude: 7.428023 } };
+    const { client } = build(
+      target,
+      [
+        { body: places },
+        { body: places },
+        { body: one },
+        { body: autocompleteOrigin },
+        { body: results },
+        { body: results },
+        { body: one },
+        { body: {} },
+      ],
+      { plugins: [spy] },
+    );
+    const circle = { center: { latitude: 43.73, longitude: 7.42 }, radius: 500 };
+    await client.places.searchText({ textQuery: "casino", fieldMask: ["*"] });
+    await client.places.searchNearby({ fieldMask: ["*"], locationRestriction: { circle } });
+    await client.places.get({ name: "places/a", fieldMask: ["*"] });
+    await client.places.autocomplete({ input: "cas" });
+    await client.geocode.address({ addressQuery: "2 Avenue de Monte-Carlo" });
+    await client.geocode.location({ locationQuery: "43.7377547,7.4270688" });
+    await client.geocode.place({ place: "places/a" });
+    const expectedPlaces = [
+      { lat: 43.7391605, lon: 7.428023 },
+      { lat: 5.5, lon: 0 },
+    ];
+    const expectedResults = [
+      { lat: 43.7377547, lon: 7.4270688 },
+      { lat: 43.7403136, lon: 7.4260731 },
+    ];
+    expect(seen).toEqual({
+      "places.searchText": expectedPlaces,
+      "places.searchNearby": expectedPlaces,
+      "places.get": [{ lat: 43.7391605, lon: 7.428023 }],
+      "places.autocomplete": [],
+      "geocode.address": expectedResults,
+      "geocode.location": expectedResults,
+      "geocode.place": [{ lat: 43.7391605, lon: 7.428023 }],
+    });
+    // An answer with no results has no points.
+    await client.geocode.address({ addressQuery: "nowhere" });
+    expect(seen["geocode.address"]).toEqual([]);
+  });
+
+  it("names every method so a plugin can run the call on another client", async () => {
+    const other = build(TARGETS[1]!, [{ body: { from: "other" } }]);
+    const reroute: Plugin = {
+      name: "reroute",
+      handle: (call) => call.run(other.client),
+    };
+    const { client, fetch } = build(target, [{ body: { from: "first" } }], {
+      plugins: [reroute],
+    });
+    const circle = { center: { latitude: 43.73, longitude: 7.42 }, radius: 500 };
+    const options = { headers: { "x-trace": "t1" } };
+    const calls: [() => Promise<unknown>, string][] = [
+      [
+        () => client.places.searchText({ textQuery: "casino", fieldMask: ["places.id"] }, options),
+        "/v1/places:searchText",
+      ],
+      [() => client.places.autocomplete({ input: "cas" }, options), "/v1/places:autocomplete"],
+      [
+        () => client.places.get({ name: "places/abc", fieldMask: ["id"] }, options),
+        "/v1/places/abc",
+      ],
+      [
+        () =>
+          client.places.searchNearby(
+            { fieldMask: ["places.id"], locationRestriction: { circle } },
+            options,
+          ),
+        "/v1/places:searchNearby",
+      ],
+      [
+        () => client.geocode.address({ addressQuery: "Monaco" }, options),
+        "/v4/geocode/address/Monaco",
+      ],
+      [
+        () => client.geocode.location({ locationQuery: "43.7,7.4" }, options),
+        "/v4/geocode/location/43.7,7.4",
+      ],
+      [() => client.geocode.place({ place: "places/abc" }, options), "/v4/geocode/places/abc"],
+    ];
+    for (const [index, [run, path]] of calls.entries()) {
+      await expect(run()).resolves.toEqual({ from: "other" });
+      expect(urlOf(other.fetch, index).pathname).toBe(`/compat/google${path}`);
+      expect(headersOf(other.fetch, index)["x-trace"]).toBe("t1");
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
-describe.skipIf(!process.env.GOOGLE_MAPS_API_KEY)("the google adapter, live", () => {
-  it("geocodes an address", async () => {
-    const answer = await live().geocode("1600 Amphitheatre Parkway, Mountain View, CA", {
-      include: ["bbox", "addressLines"],
+describe("google()", () => {
+  it("throws with neither an og server nor a key", () => {
+    let thrown: unknown;
+    try {
+      google({});
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GeocoderError);
+    expect(thrown).toMatchObject({ code: "invalid_request", provider: "google" });
+  });
+
+  it("sends the client's own headers to either server", async () => {
+    for (const target of TARGETS) {
+      const { client, fetch } = build(target, [{ body: {} }], {
+        headers: { authorization: "Bearer gateway" },
+      });
+      await client.geocode.place({ place: "places/abc" });
+      expect(headersOf(fetch)["authorization"]).toBe("Bearer gateway");
+    }
+  });
+
+  it("reports a failed connection with code connection", async () => {
+    const client = google({
+      apiKey: KEY,
+      maxRetries: 0,
+      logLevel: "off",
+      fetch: () => Promise.reject(new TypeError("fetch failed")),
     });
-    const place = answer.results[0]!;
-    expect(place.id).toEqual(expect.any(String));
-    expect(place.location).toEqual({ lat: expect.any(Number), lon: expect.any(Number) });
-    expect(place.address.countryCode).toBe("US");
-    expect(place.bbox).toHaveLength(4);
-  });
-
-  it("reverse geocodes a point", async () => {
-    const answer = await live().reverse({ lat: 37.4225508, lon: -122.0846338 });
-    expect(answer.results.length).toBeGreaterThan(0);
-    expect(answer.results[0]!.distance).toEqual(expect.any(Number));
-  });
-
-  it("resolves a suggestion with lookup in one session", async () => {
-    const geo = live();
-    const session = crypto.randomUUID();
-    const suggestions = await geo.autocomplete("Googleplex", { session, include: ["highlights"] });
-    const first = suggestions.results[0]!;
-    expect(first.location).toBeNull();
-    expect(first.id).toEqual(expect.any(String));
-    const resolved = await geo.lookup(first.id!, { session, include: ["timezone"] });
-    expect(resolved.results[0]!.location).toEqual({
-      lat: expect.any(Number),
-      lon: expect.any(Number),
+    await expect(client.geocode.address({ addressQuery: "Monaco" })).rejects.toMatchObject({
+      code: "connection",
+      provider: "google",
+      operation: "geocode.address",
+      status: undefined,
     });
-  });
-
-  it("searches places by name", async () => {
-    const geo = live();
-    const found = await geo.places("coffee in Mountain View", { limit: 3, include: ["rating"] });
-    expect(found.results.length).toBeGreaterThan(0);
-    expect(found.results.length).toBeLessThanOrEqual(3);
-    expect(found.results[0]!.type).toEqual(expect.any(String));
   });
 });

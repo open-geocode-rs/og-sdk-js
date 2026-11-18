@@ -1,207 +1,112 @@
 /**
- * The adapter for Google Maps Platform, over Places API (New) v1 and Geocoding API v4.
+ * The client that speaks Google's Places API (New) v1 and Geocoding API v4.
+ * Its methods, requests and responses are Google's own, and the JSON a server answers is returned untouched.
  *
  * ```ts
- * import { Geocoder } from "@open-geocode/client";
  * import { google } from "@open-geocode/client/google";
- * const geo = new Geocoder({ adapter: google({ apiKey: "..." }) });
- * ```
  *
- * `geocode` and `reverse` run on Geocoding, and `autocomplete`, `places` and `lookup` on Places.
- * A suggestion carries no coordinates, so resolve it with `lookup` and the same `session`.
+ * // An og server answers, under `/compat/google`. No Google key is needed.
+ * const client = google({ baseUrl: "https://og.example.com" });
+ * // Or Google itself answers.
+ * const client = google({ apiKey: "..." });
+ *
+ * const { places } = await client.places.searchText({
+ *   textQuery: "casino",
+ *   fieldMask: ["places.id", "places.displayName", "places.location"],
+ * });
+ * ```
  */
 import {
-  type Adapter,
-  type AdapterOptions,
-  type AdapterResult,
-  createTransport,
-  emptyAddress,
-  type NativeRequest,
-  nativeRequest,
-  pool,
-  streetLine,
-  text,
-} from "./adapter.ts";
-import type { RequestOptions } from "./core.ts";
-import { type GeocoderErrorCode, NotFoundError } from "./errors.ts";
+  type ClientInfo,
+  type CommonOptions,
+  createBase,
+  type Position,
+  type Step,
+} from "./base.ts";
+import type { APIPromise, RequestOptions } from "./core.ts";
+import { GeocoderError, type GeocoderErrorCode, type OgError } from "./errors.ts";
 import type {
-  AccessPoint,
-  Accuracy,
-  Address,
-  Attribution,
-  BBox,
-  BusinessStatus,
-  FieldName,
-  Include,
-  LatLon,
-  OptionName,
-  PlaceRecord,
-  PlaceType,
-  StructuredAddress,
-  TextRange,
-} from "./types.ts";
+  AutocompleteParams,
+  AutocompleteResponse,
+  ErrorResponse,
+  GeocodeAddressParams,
+  GeocodeAddressResponse,
+  GeocodeLocationParams,
+  GeocodeLocationResponse,
+  GeocodePlaceParams,
+  GeocodeResult,
+  GetPlaceParams,
+  Place,
+  ResponseLatLng,
+  SearchNearbyParams,
+  SearchNearbyResponse,
+  SearchTextParams,
+  SearchTextResponse,
+} from "./google.types.ts";
 
-/** Options for {@link google}. */
-export interface GoogleOptions extends AdapterOptions {
-  /** A Google Maps Platform API key, sent in the `X-Goog-Api-Key` header. */
-  apiKey: string;
-  /** Where Places API (New) is reached. Default `https://places.googleapis.com`. */
-  placesBaseUrl?: string | undefined;
-  /** Where Geocoding API v4 is reached. Default `https://geocode.googleapis.com`. */
-  geocodingBaseUrl?: string | undefined;
+export type * from "./google.types.ts";
+
+/** Options for {@link google}. Give `baseUrl` or `apiKey`. */
+export interface GoogleOptions extends CommonOptions {
+  /** An og server. Requests go to `<baseUrl>/compat/google`, and no key is sent. */
+  baseUrl?: string | undefined;
+  /** A Google Maps Platform API key, for asking Google itself. It is sent in the `X-Goog-Api-Key` header. */
+  apiKey?: string | undefined;
 }
 
-/** Google's own APIs, with the adapter's key and the shared retries and timeouts. */
-export interface GoogleNative {
-  /** Any Places API (New) call, such as `{ path: "/v1/places:searchNearby", body }`. */
-  places: NativeRequest;
-  /** Any Geocoding API call, such as `{ path: "/v4/geocode/destinations", body }`. */
-  geocoding: NativeRequest;
+/** The client {@link google} builds. */
+export interface GoogleClient extends ClientInfo {
+  /** Places API (New) v1. */
+  places: {
+    /** Text Search. `POST /v1/places:searchText`. */
+    searchText(params: SearchTextParams, options?: RequestOptions): APIPromise<SearchTextResponse>;
+    /**
+     * Autocomplete. `POST /v1/places:autocomplete`.
+     * A failed request is not retried unless `maxRetries` says so, since the next keystroke has replaced it by then.
+     */
+    autocomplete(
+      params: AutocompleteParams,
+      options?: RequestOptions,
+    ): APIPromise<AutocompleteResponse>;
+    /** Place Details. `GET /v1/places/{placeId}`. */
+    get(params: GetPlaceParams, options?: RequestOptions): APIPromise<Place>;
+    /** Nearby Search. `POST /v1/places:searchNearby`. An og server does not have it and fails with code `unsupported`. */
+    searchNearby(
+      params: SearchNearbyParams,
+      options?: RequestOptions,
+    ): APIPromise<SearchNearbyResponse>;
+  };
+  /** Geocoding API v4. */
+  geocode: {
+    /** Geocodes an address. `GET /v4/geocode/address/{addressQuery}`, or `GET /v4/geocode/address` for an address in parts. */
+    address(
+      params: GeocodeAddressParams,
+      options?: RequestOptions,
+    ): APIPromise<GeocodeAddressResponse>;
+    /** Reverse geocodes a point. `GET /v4/geocode/location/{locationQuery}`, or `GET /v4/geocode/location` for a point in parts. */
+    location(
+      params: GeocodeLocationParams,
+      options?: RequestOptions,
+    ): APIPromise<GeocodeLocationResponse>;
+    /**
+     * Geocodes a place ID. `GET /v4/geocode/places/{placeId}`.
+     * The answer is one bare result, with no `results` list around it.
+     */
+    place(params: GeocodePlaceParams, options?: RequestOptions): APIPromise<GeocodeResult>;
+  };
 }
 
-// Proto3 JSON leaves out a number that is zero, so every numeric key may be absent.
-interface LatLng {
-  latitude?: number;
-  longitude?: number;
-}
+const PLACES_URL = "https://places.googleapis.com";
+const GEOCODE_URL = "https://geocode.googleapis.com";
 
-interface Viewport {
-  low?: LatLng;
-  high?: LatLng;
-}
+/**
+ * A cache never keeps an answer longer than the server that gave it allows.
+ * Google allows its coordinates to be kept for 30 days.
+ * See https://developers.google.com/maps/documentation/geocoding/policies.
+ */
+const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
 
-interface LocalizedText {
-  text?: string;
-}
-
-interface AddressComponent {
-  longText?: string;
-  shortText?: string;
-  types?: string[];
-}
-
-interface Hours {
-  weekdayDescriptions?: string[];
-  openNow?: boolean;
-}
-
-/** A Geocoding result or a Places place. The two share most of their fields. */
-interface Result {
-  /** The place ID on a place. */
-  id?: string;
-  /** The data providers Google asks to be credited for a place. */
-  attributions?: { provider?: string; providerUri?: string }[];
-  /** The place ID on a Geocoding result. */
-  placeId?: string;
-  displayName?: LocalizedText;
-  formattedAddress?: string;
-  location?: LatLng;
-  granularity?: string;
-  viewport?: Viewport;
-  bounds?: Viewport;
-  types?: string[];
-  addressComponents?: AddressComponent[];
-  postalAddress?: { regionCode?: string; addressLines?: string[] };
-  plusCode?: { globalCode?: string; compoundCode?: string };
-  primaryType?: string;
-  primaryTypeDisplayName?: LocalizedText;
-  internationalPhoneNumber?: string;
-  websiteUri?: string;
-  regularOpeningHours?: Hours;
-  currentOpeningHours?: Hours;
-  rating?: number;
-  userRatingCount?: number;
-  businessStatus?: string;
-  timeZone?: { id?: string };
-  utcOffsetMinutes?: number;
-  entrances?: { location?: LatLng; tags?: string[] }[];
-  navigationPoints?: { location?: LatLng; usages?: string[] }[];
-}
-
-interface FormattableText {
-  text?: string;
-  matches?: { startOffset?: number; endOffset?: number }[];
-}
-
-interface Prediction {
-  placeId?: string;
-  text?: FormattableText;
-  structuredFormat?: { mainText?: FormattableText };
-  types?: string[];
-  distanceMeters?: number;
-}
-
-interface Suggestions {
-  suggestions?: { placePrediction?: Prediction }[];
-}
-
-interface ErrorBody {
-  error?: { message?: string; status?: string; details?: { reason?: string }[] };
-}
-
-const TYPES: ReadonlyMap<string, PlaceType> = new Map<string, PlaceType>([
-  ["establishment", "poi"],
-  ["point_of_interest", "poi"],
-  ["street_address", "address"],
-  ["premise", "address"],
-  ["subpremise", "address"],
-  ["intersection", "intersection"],
-  ["route", "street"],
-  ["postal_code", "postcode"],
-  ["postal_code_prefix", "postcode"],
-  ["neighborhood", "neighbourhood"],
-  ["locality", "locality"],
-  ["postal_town", "locality"],
-  ["administrative_area_level_2", "district"],
-  ["administrative_area_level_1", "region"],
-  ["country", "country"],
-  ["sublocality", "area"],
-  ["sublocality_level_1", "area"],
-  ["sublocality_level_2", "area"],
-  ["sublocality_level_3", "area"],
-  ["sublocality_level_4", "area"],
-  ["sublocality_level_5", "area"],
-  ["administrative_area_level_3", "area"],
-  ["administrative_area_level_4", "area"],
-  ["administrative_area_level_5", "area"],
-  ["administrative_area_level_6", "area"],
-  ["administrative_area_level_7", "area"],
-  ["colloquial_area", "area"],
-  ["natural_feature", "area"],
-  ["archipelago", "area"],
-  ["continent", "area"],
-]);
-
-/** Which reading wins when a record carries several types. A business at an address is a POI. */
-const RANK: readonly PlaceType[] = [
-  "poi",
-  "address",
-  "intersection",
-  "street",
-  "postcode",
-  "neighbourhood",
-  "locality",
-  "district",
-  "region",
-  "country",
-  "area",
-];
-
-const ACCURACY: ReadonlyMap<string, Accuracy> = new Map<string, Accuracy>([
-  ["ROOFTOP", "rooftop"],
-  ["RANGE_INTERPOLATED", "interpolated"],
-  ["GEOMETRIC_CENTER", "centroid"],
-  ["APPROXIMATE", "approximate"],
-]);
-
-// FUTURE_OPENING has no unified equivalent, so it reads as no value.
-const BUSINESS: ReadonlyMap<string, BusinessStatus> = new Map<string, BusinessStatus>([
-  ["OPERATIONAL", "operational"],
-  ["CLOSED_TEMPORARILY", "closed_temporarily"],
-  ["CLOSED_PERMANENTLY", "closed_permanently"],
-]);
-
-/** The unified code of each `error.status`. Several share an HTTP status, so the status alone misreads them. */
+/** The code of each `error.status`. Several share an HTTP status, so the status alone misreads them. */
 const ERRORS: ReadonlyMap<string, GeocoderErrorCode> = new Map<string, GeocoderErrorCode>([
   ["INVALID_ARGUMENT", "invalid_request"],
   ["FAILED_PRECONDITION", "invalid_request"],
@@ -215,603 +120,245 @@ const ERRORS: ReadonlyMap<string, GeocoderErrorCode> = new Map<string, GeocoderE
   ["UNIMPLEMENTED", "unsupported"],
   ["UNAVAILABLE", "unavailable"],
   ["DEADLINE_EXCEEDED", "timeout"],
+  ["CANCELLED", "aborted"],
   ["INTERNAL", "provider_error"],
   ["UNKNOWN", "provider_error"],
   ["DATA_LOSS", "provider_error"],
 ]);
 
-/**
- * The field mask is built from these lists, since Places bills by the fields asked for.
- * The default paths fill the nine default fields. `addressDetails` reads `addressComponents`,
- * which is a default path, so it adds none. `raw` asks for `*`.
- *
- * Places paths each unified `include` adds, on `places:searchText` and `places/{id}`.
- * - `bbox`: `viewport`
- * - `addressLines`: `postalAddress`
- * - `categories`: `primaryType`, `primaryTypeDisplayName`
- * - `contact`: `internationalPhoneNumber`, `websiteUri`
- * - `openingHours`: `regularOpeningHours.weekdayDescriptions`, `regularOpeningHours.openNow`, `currentOpeningHours.openNow`
- * - `rating`: `rating`, `userRatingCount`
- * - `businessStatus`: `businessStatus`
- * - `timezone`: `timeZone`, `utcOffsetMinutes`
- * - `accessPoints`: `entrances`, `navigationPoints`
- * - `plusCode`: `plusCode`
- */
-const PLACE_PATHS: readonly string[] = [
-  "id",
-  // The credits Google asks to be shown with a place are part of every answer.
-  "attributions",
-  "displayName",
-  "formattedAddress",
-  "location",
-  "types",
-  "addressComponents",
-];
-const PLACE_INCLUDES: Partial<Record<Include, readonly string[]>> = {
-  bbox: ["viewport"],
-  addressLines: ["postalAddress"],
-  categories: ["primaryType", "primaryTypeDisplayName"],
-  contact: ["internationalPhoneNumber", "websiteUri"],
-  openingHours: [
-    "regularOpeningHours.weekdayDescriptions",
-    "regularOpeningHours.openNow",
-    "currentOpeningHours.openNow",
-  ],
-  rating: ["rating", "userRatingCount"],
-  businessStatus: ["businessStatus"],
-  timezone: ["timeZone", "utcOffsetMinutes"],
-  accessPoints: ["entrances", "navigationPoints"],
-  plusCode: ["plusCode"],
-};
-
-/**
- * Geocoding paths each unified `include` adds, on `geocode/address` and `geocode/location`.
- * - `bbox`: `viewport`, `bounds`
- * - `addressLines`: `postalAddress`
- * - `plusCode`: `plusCode`
- */
-const GEOCODE_PATHS: readonly string[] = [
-  "placeId",
-  "location",
-  "granularity",
-  "formattedAddress",
-  "addressComponents",
-  "types",
-];
-const GEOCODE_INCLUDES: Partial<Record<Include, readonly string[]>> = {
-  bbox: ["viewport", "bounds"],
-  addressLines: ["postalAddress"],
-  plusCode: ["plusCode"],
-};
-
-/**
- * Autocomplete paths, under `suggestions.placePrediction`.
- * `highlights` adds `text.matches`, and `focus` adds `distanceMeters`.
- */
-const SUGGESTION_PATHS: readonly string[] = [
-  "placeId",
-  "text.text",
-  "structuredFormat.mainText.text",
-  "types",
-];
-
-function fieldMask(
-  include: readonly Include[],
-  paths: readonly string[],
-  extras: Partial<Record<Include, readonly string[]>>,
-  prefix: string,
-): string {
-  if (include.includes("raw")) return "*";
-  return [...paths, ...include.flatMap((name) => extras[name] ?? [])]
-    .map((path) => `${prefix}${path}`)
-    .join(",");
+function failure(body: unknown): ErrorResponse["error"] {
+  return body !== null && typeof body === "object" ? (body as ErrorResponse).error : undefined;
 }
 
-/** The widest circle the API takes, so `focus` steers the ranking without acting as a filter. */
-const FOCUS_RADIUS_M = 50_000;
-/** The most `places:searchText` returns on one page. */
-const PAGE_SIZE = 20;
-/** The most types `includedPrimaryTypes` takes. */
-const PRIMARY_TYPES = 5;
-/** Place Details requests in flight at once. */
-const LOOKUPS = 4;
-
-const GEOCODE_FIELDS: readonly FieldName[] = [
-  "id",
-  "location",
-  "accuracy",
-  "address",
-  "bbox",
-  "addressDetails",
-  "addressLines",
-  "plusCode",
-];
-const PLACE_FIELDS: readonly FieldName[] = [
-  "id",
-  "location",
-  "address",
-  "bbox",
-  "addressDetails",
-  "addressLines",
-  "categories",
-  "contact",
-  "openingHours",
-  "rating",
-  "businessStatus",
-  "timezone",
-  "accessPoints",
-  "plusCode",
-];
-
-function point(source: LatLng | undefined): LatLon | null {
-  return source === undefined ? null : { lat: source.latitude ?? 0, lon: source.longitude ?? 0 };
+function describeError(body: unknown): string | undefined {
+  const message = failure(body)?.message;
+  return typeof message === "string" && message !== "" ? message : undefined;
 }
 
-function box(source: Viewport | undefined): BBox | null {
-  const low = point(source?.low);
-  const high = point(source?.high);
-  return low === null || high === null ? null : [low.lon, low.lat, high.lon, high.lat];
+function errorCode(error: OgError): GeocoderErrorCode | undefined {
+  const failed = failure(error.body);
+  // A rejected key answers 400 INVALID_ARGUMENT, which would read as a malformed request.
+  if (
+    Array.isArray(failed?.details) &&
+    failed.details.some((detail) => detail?.reason === "API_KEY_INVALID")
+  )
+    return "unauthenticated";
+  return ERRORS.get(failed?.status ?? "");
 }
 
-function rectangle([west, south, east, north]: BBox): { rectangle: Viewport } {
-  return {
-    rectangle: {
-      low: { latitude: south, longitude: west },
-      high: { latitude: north, longitude: east },
-    },
-  };
+/** The point of one place or result. A coordinate proto3 JSON left out is zero. */
+function point(holder: { location?: ResponseLatLng } | null | undefined): Position[] {
+  const location = holder?.location;
+  if (location === null || typeof location !== "object") return [];
+  return [{ lat: location.latitude ?? 0, lon: location.longitude ?? 0 }];
 }
 
-function toType(types: readonly string[] | undefined): PlaceType {
-  const found = new Set<PlaceType>();
-  for (const type of types ?? []) {
-    const mapped = TYPES.get(type);
-    if (mapped !== undefined) found.add(mapped);
+function points(list: readonly { location?: ResponseLatLng }[] | undefined): Position[] {
+  return Array.isArray(list) ? list.flatMap(point) : [];
+}
+
+/** Autocomplete answers with no points, so it has none to give. */
+function positions(method: string, data: unknown): Position[] {
+  if (data === null || typeof data !== "object") return [];
+  switch (method) {
+    case "places.searchText":
+    case "places.searchNearby":
+      return points((data as SearchTextResponse).places);
+    case "geocode.address":
+    case "geocode.location":
+      return points((data as GeocodeAddressResponse).results);
+    case "places.get":
+    case "geocode.place":
+      return point(data as Place);
+    default:
+      return [];
   }
-  return RANK.find((type) => found.has(type)) ?? "unknown";
+}
+
+/** The field mask as its header. Paths are joined with commas and no spaces, as Google reads them. */
+function masked(fieldMask: readonly string[] | undefined): Record<string, string> {
+  return fieldMask === undefined || fieldMask.length === 0
+    ? {}
+    : { "X-Goog-FieldMask": fieldMask.join(",") };
 }
 
 /**
- * The Google primary types that read as exactly these unified types, for `includedPrimaryTypes`.
- * Nothing when a type has no such list, or when the list is longer than the API takes.
- * The caller still filters the answer, so this only saves suggestions from being crowded out.
+ * Query parameters as Google's REST transcoding reads them.
+ * A message field becomes dotted names, and a repeated field repeats its key.
  */
-function primaryTypes(types: readonly PlaceType[]): string[] | undefined {
-  // A POI's primary type is its category, such as `restaurant`, which no short list covers.
-  if (types.length === 0 || types.includes("poi")) return undefined;
-  const wanted = new Set(types);
-  const names = [...TYPES].filter(([, type]) => wanted.has(type)).map(([name]) => name);
-  const covered = new Set(names.map((name) => TYPES.get(name)));
-  return covered.size === wanted.size && names.length <= PRIMARY_TYPES ? names : undefined;
-}
-
-function toAddress(source: Result): Address {
-  const parts = source.addressComponents ?? [];
-  const part = (type: string): AddressComponent | undefined =>
-    parts.find((component) => component.types?.includes(type));
-  const long = (type: string): string | null => text(part(type)?.longText);
-  const region = part("administrative_area_level_1");
-  const country = part("country");
-  const address = emptyAddress();
-  address.houseNumber = long("street_number");
-  address.street = long("route");
-  address.unit = long("subpremise");
-  address.neighbourhood = long("neighborhood");
-  address.locality = long("locality") ?? long("postal_town");
-  address.district = long("administrative_area_level_2");
-  address.region = text(region?.longText);
-  // Google repeats the name as the short text where a region has no code, so only a differing one is a code.
-  address.regionCode = region?.shortText === region?.longText ? null : text(region?.shortText);
-  address.postcode = long("postal_code");
-  address.country = text(country?.longText);
-  // Both sources hold the two-letter country code, so upper-casing it is its ISO form.
-  const code = [country?.shortText, source.postalAddress?.regionCode].find(
-    (value) => value !== undefined && /^[A-Za-z]{2}$/.test(value),
-  );
-  address.countryCode = code?.toUpperCase() ?? null;
-  return address;
+function toQuery(fields: Record<string, unknown>): URLSearchParams {
+  const search = new URLSearchParams();
+  const add = (name: string, value: unknown): void => {
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) for (const item of value) add(name, item);
+    else if (typeof value === "object")
+      for (const [key, inner] of Object.entries(value)) add(`${name}.${key}`, inner);
+    else search.append(name, String(value));
+  };
+  for (const [name, value] of Object.entries(fields)) add(name, value);
+  return search;
 }
 
 /**
- * House number and street as Google writes them.
- * Google sends no such line of its own, so the one inside `formattedAddress` is used,
- * which keeps the country's own order of number and street.
+ * A text as one path segment, or `undefined` for a text that cannot be one.
+ * An empty segment, `.` and `..` are rewritten when a URL is parsed, so the request would reach another path.
  */
-function streetName(source: Result, address: Address): string | undefined {
-  const route = source.addressComponents?.find((component) => component.types?.includes("route"));
-  const label = source.formattedAddress ?? "";
-  if (address.houseNumber !== null)
-    for (const street of [route?.shortText, route?.longText])
-      for (const line of [`${address.houseNumber} ${street}`, `${street} ${address.houseNumber}`])
-        if (street && label.includes(line)) return line;
-  return streetLine({
-    houseNumber: address.houseNumber ?? undefined,
-    street: address.street ?? undefined,
+function segment(text: string): string | undefined {
+  if (text === "" || text === "." || text === "..") return undefined;
+  // A comma is legal in a path and Google's own URLs keep it, so `lat,lng` stays readable.
+  return encodeURIComponent(text).replace(/%2C/g, ",");
+}
+
+/** A resource name such as `places/{placeId}` as a path, each of its parts encoded. */
+function resource(name: string, field: string, method: string): string {
+  const parts = name.split("/").map(segment);
+  if (!name.startsWith("places/") || parts.includes(undefined))
+    throw new GeocoderError(
+      `\`${field}\` must be a resource name of the form \`places/{placeId}\`, and it is ${JSON.stringify(name)}.`,
+      { code: "invalid_request", operation: method, provider: "google" },
+    );
+  return parts.join("/");
+}
+
+/**
+ * Builds a client that speaks Google's Places API (New) and Geocoding API v4.
+ * With `baseUrl` an og server answers, and with `apiKey` alone Google does.
+ */
+export function google(options: GoogleOptions): GoogleClient {
+  const base = createBase({
+    shape: "google",
+    options,
+    baseUrl: options.baseUrl,
+    credentials: options.apiKey !== undefined,
+    // Google serves the two APIs from two hosts, so there is no one root. og serves both under one.
+    ...(options.apiKey === undefined
+      ? {}
+      : { vendorHeaders: { "X-Goog-Api-Key": options.apiKey } }),
+    cache: { maxTtl: THIRTY_DAYS },
+    describeError,
+    errorCode,
+    positions,
   });
-}
+  const places = base.server === "og" ? "" : PLACES_URL;
+  const geocode = base.server === "og" ? "" : GEOCODE_URL;
 
-function nameOf(source: Result, type: PlaceType, address: Address): string {
-  const display = text(source.displayName?.text);
-  if (display !== null) return display;
-  const street = type === "address" ? streetName(source, address) : undefined;
-  if (street !== undefined) return street;
-  // A Geocoding result has no name of its own. The component of its own type holds it.
-  const own = source.addressComponents?.find((component) =>
-    component.types?.some((kind) => kind !== "political" && source.types?.includes(kind)),
-  );
-  return text(own?.longText) ?? source.formattedAddress ?? "";
-}
-
-/**
- * Google requires this text, unchanged and untranslated, wherever its content is shown off a Google map.
- * See https://developers.google.com/maps/documentation/geocoding/policies.
- */
-const GOOGLE_CREDIT: Attribution = { text: "Google Maps", url: null, licence: null };
-
-/**
- * Google lets latitude and longitude be kept for 30 days, and place IDs without limit.
- * See https://developers.google.com/maps/documentation/geocoding/policies.
- */
-const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-
-/** The credit Google requires where its content is shown, and each data provider it names for a place. */
-function credits(shown: readonly Result[] = []): Attribution[] {
-  const named = new Map<string, Attribution>();
-  for (const place of shown)
-    for (const credit of place.attributions ?? [])
-      if (credit.provider)
-        named.set(credit.provider, {
-          text: credit.provider,
-          url: credit.providerUri ?? null,
-          licence: null,
-        });
-  return [GOOGLE_CREDIT, ...named.values()];
-}
-
-/** The fields a Geocoding result and a place share. */
-function toPlace(source: Result): PlaceRecord {
-  const type = toType(source.types);
-  const address = toAddress(source);
-  const name = nameOf(source, type, address);
-  const formatted = text(source.formattedAddress);
-  const location = point(source.location);
-  const long = (kind: string): string | null =>
-    text(source.addressComponents?.find((part) => part.types?.includes(kind))?.longText);
-  const lines = source.postalAddress?.addressLines;
-  const plus = source.plusCode;
-  return {
-    id: text(source.id) ?? text(source.placeId),
-    type,
-    name,
-    // A POI's formatted address leaves its name out, so the label leads with it.
-    label:
-      formatted === null
-        ? name
-        : type === "poi" && !formatted.includes(name)
-          ? `${name}, ${formatted}`
-          : formatted,
-    location,
-    accuracy: ACCURACY.get(source.granularity ?? "") ?? null,
-    confidence: null,
-    // Google sends no distance for these, so the Geocoder measures it.
-    distance: null,
-    address,
-    // The viewport is the box Google frames the result with. `bounds` is the feature's own extent.
-    bbox: box(source.viewport) ?? box(source.bounds),
-    addressDetails:
-      source.addressComponents === undefined
-        ? null
-        : {
-            unitType: null,
-            building: long("premise"),
-            floor: long("floor"),
-            sublocality: long("sublocality_level_1") ?? long("sublocality"),
-            postcodeSuffix: long("postal_code_suffix"),
-          },
-    addressLines: lines?.length ? [...lines] : null,
-    plusCode:
-      plus === undefined
-        ? null
-        : { global: text(plus.globalCode), compound: text(plus.compoundCode) },
-    raw: source,
-  };
-}
-
-function accessPoints(source: Result): AccessPoint[] | null {
-  const points: AccessPoint[] = [];
-  const add = (location: LatLng | undefined, kind: string | undefined): void => {
-    const at = point(location);
-    if (at !== null) points.push({ ...at, kind: kind ?? null });
-  };
-  // `kind` is Google's own tag or usage, such as `PREFERRED` or `DROPOFF`.
-  for (const entrance of source.entrances ?? []) add(entrance.location, entrance.tags?.[0]);
-  for (const stop of source.navigationPoints ?? []) add(stop.location, stop.usages?.[0]);
-  return points.length === 0 ? null : points;
-}
-
-/** A place with the fields only Places has. */
-function toDetailedPlace(source: Result): PlaceRecord {
-  const place = toPlace(source);
-  const phone = text(source.internationalPhoneNumber);
-  const website = text(source.websiteUri);
-  const hours = source.regularOpeningHours?.weekdayDescriptions ?? [];
-  const openNow =
-    source.currentOpeningHours?.openNow ?? source.regularOpeningHours?.openNow ?? null;
-  const zone = text(source.timeZone?.id);
-  place.categories = source.types?.length
-    ? source.types.map((id) => ({
-        id,
-        name: id === source.primaryType ? text(source.primaryTypeDisplayName?.text) : null,
-        primary: id === source.primaryType,
-      }))
-    : null;
-  place.contact = phone === null && website === null ? null : { phone, website, email: null };
-  place.openingHours =
-    hours.length === 0 && openNow === null ? null : { text: [...hours], openNow };
-  place.rating =
-    source.rating === undefined
-      ? null
-      : { value: source.rating, count: source.userRatingCount ?? null };
-  place.businessStatus = BUSINESS.get(source.businessStatus ?? "") ?? null;
-  place.timezone =
-    zone === null ? null : { name: zone, utcOffsetMinutes: source.utcOffsetMinutes ?? null };
-  place.accessPoints = accessPoints(source);
-  return place;
-}
-
-function toSuggestion(source: Prediction): PlaceRecord {
-  const label = source.text?.text ?? "";
-  const highlights: TextRange[] | undefined = source.text?.matches?.map((match) => ({
-    start: match.startOffset ?? 0,
-    end: match.endOffset ?? 0,
-  }));
-  return {
-    id: text(source.placeId),
-    type: toType(source.types),
-    name: text(source.structuredFormat?.mainText?.text) ?? label,
-    label,
-    location: null,
-    accuracy: null,
-    confidence: null,
-    // Google leaves the distance out when it is zero, and on routes, so an absent one is unknown.
-    distance: source.distanceMeters ?? null,
-    address: emptyAddress(),
-    highlights: highlights?.length ? highlights : null,
-    raw: source,
-  };
-}
-
-/** The structured form of `geocode/address`, as dotted `address.*` parameters. */
-function addressParams(address: StructuredAddress): URLSearchParams {
-  const params = new URLSearchParams();
-  const set = (name: string, value: string | undefined): void => {
-    if (value) params.append(`address.${name}`, value);
-  };
-  const code = address.country !== undefined && /^[A-Za-z]{2}$/.test(address.country);
-  set("addressLines", streetLine(address));
-  // A postal address has no part for a country's name, so a name goes in as the last line.
-  if (!code) set("addressLines", address.country);
-  set("locality", address.locality);
-  set("administrativeArea", address.region);
-  set("postalCode", address.postcode);
-  if (code) set("regionCode", address.country?.toUpperCase());
-  return params;
-}
-
-function ofTypes(results: PlaceRecord[], types: readonly PlaceType[] | undefined): PlaceRecord[] {
-  // Google's own type filters use its own vocabulary, so the adapter applies the unified types itself.
-  return types === undefined ? results : results.filter((place) => types.includes(place.type));
-}
-
-/** The caller's options with the field mask, which a caller's own header may still replace. */
-function masked(mask: string, call: RequestOptions | undefined): RequestOptions {
-  return { ...call, headers: { "X-Goog-FieldMask": mask, ...call?.headers } };
-}
-
-/** The Google adapter. Its `native` reaches Places and Geocoding directly. */
-export function google(options: GoogleOptions): Adapter<GoogleNative> {
-  const transport = createTransport(options, {
-    name: "google",
-    baseUrl: options.placesBaseUrl ?? "https://places.googleapis.com",
-    describeError: (body) =>
-      text((body as ErrorBody | null | undefined)?.error?.message) ?? undefined,
-  });
-  const authorize = (call: { headers: Record<string, string> }): void => {
-    call.headers["X-Goog-Api-Key"] = options.apiKey;
-  };
-  const places = nativeRequest(transport, authorize);
-  const geocoding = nativeRequest(
-    transport,
-    authorize,
-    (options.geocodingBaseUrl ?? "https://geocode.googleapis.com").replace(/\/+$/, ""),
-  );
-
-  async function geocoded(
+  /** A POST whose body is the request without its field mask. The searches change nothing, so a retry is safe. */
+  function post<T>(
+    method: string,
     path: string,
-    query: URLSearchParams,
-    request: { language?: string[]; include: Include[]; types?: PlaceType[] },
+    params: { fieldMask?: readonly string[] | undefined },
     call: RequestOptions | undefined,
-  ): Promise<AdapterResult> {
-    const language = request.language?.[0];
-    if (language !== undefined) query.set("languageCode", language);
-    const answer = await geocoding<{ results?: Result[] }>({
-      ...masked(fieldMask(request.include, GEOCODE_PATHS, GEOCODE_INCLUDES, "results."), call),
-      path,
-      query,
-    }).withResponse();
-    return {
-      results: ofTypes((answer.data.results ?? []).map(toPlace), request.types),
-      attribution: credits(),
-      raw: answer.data,
-      response: answer.response,
-      requestId: answer.requestId,
+    defaults?: RequestOptions,
+  ): APIPromise<T> {
+    const { fieldMask, ...body } = params;
+    const step: Step<T> = {
+      method,
+      args: [params],
+      options: call,
+      send: (o) =>
+        base.http({
+          method: "POST",
+          path: `${places}${path}`,
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json", ...masked(fieldMask) },
+          idempotent: true,
+          options: defaults === undefined ? o : { ...defaults, ...o },
+        }),
     };
+    return base.call(step);
   }
 
-  const geocodeOptions: readonly OptionName[] = ["limit", "language", "types"];
+  function get<T>(
+    method: string,
+    params: unknown,
+    url: () => { path: string; query: Record<string, unknown> },
+    fieldMask: readonly string[] | undefined,
+    call: RequestOptions | undefined,
+  ): APIPromise<T> {
+    const step: Step<T> = {
+      method,
+      args: [params],
+      options: call,
+      send: async (o) => {
+        const { path, query } = url();
+        return base.http({
+          method: "GET",
+          path,
+          query: toQuery(query),
+          headers: masked(fieldMask),
+          idempotent: true,
+          options: o,
+        });
+      },
+    };
+    return base.call(step);
+  }
 
   return {
-    id: "google",
-    native: { places, geocoding },
-    capabilities: {
-      geocode: { options: [...geocodeOptions, "structured"], fields: GEOCODE_FIELDS },
-      reverse: { options: geocodeOptions, fields: GEOCODE_FIELDS },
-      autocomplete: {
-        options: ["limit", "language", "countries", "focus", "bounds", "types", "session"],
-        fields: ["id", "distance", "highlights"],
-        coordinates: false,
+    shape: base.shape,
+    server: base.server,
+    places: {
+      searchText: (params, call) =>
+        post("places.searchText", "/v1/places:searchText", params, call),
+      autocomplete: (params, call) =>
+        // A retried keystroke is already stale.
+        post("places.autocomplete", "/v1/places:autocomplete", params, call, { maxRetries: 0 }),
+      get: (params, call) => {
+        const { name, fieldMask, ...query } = params;
+        return get(
+          "places.get",
+          params,
+          () => ({ path: `${places}/v1/${resource(name, "name", "places.get")}`, query }),
+          fieldMask,
+          call,
+        );
       },
-      places: {
-        options: ["limit", "language", "focus", "bounds", "types"],
-        fields: PLACE_FIELDS,
+      searchNearby: (params, call) =>
+        post("places.searchNearby", "/v1/places:searchNearby", params, call),
+    },
+    geocode: {
+      address: (params, call) => {
+        const { fieldMask, addressQuery, ...rest } = params;
+        const inPath = addressQuery === undefined ? undefined : segment(addressQuery);
+        return get(
+          "geocode.address",
+          params,
+          () =>
+            inPath === undefined
+              ? // A text that cannot be a path segment goes in the query, which Google reads the same way.
+                { path: `${geocode}/v4/geocode/address`, query: { addressQuery, ...rest } }
+              : { path: `${geocode}/v4/geocode/address/${inPath}`, query: rest },
+          fieldMask,
+          call,
+        );
       },
-      lookup: { options: ["language", "session"], fields: PLACE_FIELDS },
-      cache: { maxTtl: THIRTY_DAYS },
-    },
-    geocode(request, call) {
-      return request.address === undefined
-        ? geocoded(
-            `/v4/geocode/address/${encodeURIComponent(request.query ?? "")}`,
-            new URLSearchParams(),
-            request,
-            call,
-          )
-        : geocoded("/v4/geocode/address", addressParams(request.address), request, call);
-    },
-    reverse(request, call) {
-      const { lat, lon } = request.point;
-      return geocoded(`/v4/geocode/location/${lat},${lon}`, new URLSearchParams(), request, call);
-    },
-    async autocomplete(request, call) {
-      const { focus, bounds, include } = request;
-      const paths = [
-        ...SUGGESTION_PATHS,
-        ...(include.includes("highlights") ? ["text.matches"] : []),
-        ...(focus === undefined ? [] : ["distanceMeters"]),
-      ];
-      const primary = request.types === undefined ? undefined : primaryTypes(request.types);
-      const origin =
-        focus === undefined ? undefined : { latitude: focus.lat, longitude: focus.lon };
-      const answer = await places<Suggestions>({
-        ...masked(fieldMask(include, paths, {}, "suggestions.placePrediction."), call),
-        path: "/v1/places:autocomplete",
-        body: {
-          input: request.query,
-          ...(request.language?.[0] === undefined ? {} : { languageCode: request.language[0] }),
-          ...(request.countries?.length
-            ? { includedRegionCodes: request.countries.map((code) => code.toLowerCase()) }
-            : {}),
-          ...(primary === undefined ? {} : { includedPrimaryTypes: primary }),
-          // `origin` is what makes Google measure `distanceMeters`.
-          ...(origin === undefined ? {} : { origin }),
-          // The API takes a bias or a restriction, never both, and the restriction is the promise to keep.
-          ...(bounds !== undefined
-            ? { locationRestriction: rectangle(bounds) }
-            : origin !== undefined
-              ? { locationBias: { circle: { center: origin, radius: FOCUS_RADIUS_M } } }
-              : {}),
-          ...(request.session === undefined ? {} : { sessionToken: request.session }),
-        },
-        // A search changes nothing, so a retry may repeat it.
-        idempotent: true,
-      }).withResponse();
-      const predictions = (answer.data.suggestions ?? []).flatMap((suggestion) =>
-        suggestion.placePrediction === undefined ? [] : [suggestion.placePrediction],
-      );
-      return {
-        results: ofTypes(predictions.map(toSuggestion), request.types),
-        attribution: credits(),
-        raw: answer.data,
-        response: answer.response,
-        requestId: answer.requestId,
-      };
-    },
-    async places(request, call) {
-      const { focus, bounds, limit } = request;
-      const answer = await places<{ places?: Result[] }>({
-        ...masked(fieldMask(request.include, PLACE_PATHS, PLACE_INCLUDES, "places."), call),
-        path: "/v1/places:searchText",
-        body: {
-          textQuery: request.query,
-          ...(request.language?.[0] === undefined ? {} : { languageCode: request.language[0] }),
-          // The type filter runs after the search, so it needs the whole page to pick from.
-          ...(limit === undefined || limit < 1 || request.types !== undefined
-            ? {}
-            : { pageSize: Math.min(limit, PAGE_SIZE) }),
-          // The API takes a bias or a restriction, never both, and the restriction is the promise to keep.
-          ...(bounds !== undefined
-            ? { locationRestriction: rectangle(bounds) }
-            : focus !== undefined
-              ? {
-                  locationBias: {
-                    circle: {
-                      center: { latitude: focus.lat, longitude: focus.lon },
-                      radius: FOCUS_RADIUS_M,
-                    },
-                  },
-                }
-              : {}),
-        },
-        idempotent: true,
-      }).withResponse();
-      return {
-        results: ofTypes((answer.data.places ?? []).map(toDetailedPlace), request.types),
-        attribution: credits(answer.data.places),
-        raw: answer.data,
-        response: answer.response,
-        requestId: answer.requestId,
-      };
-    },
-    async lookup(request, call) {
-      const query = {
-        languageCode: request.language?.[0],
-        sessionToken: request.session,
-      };
-      const shared = masked(fieldMask(request.include, PLACE_PATHS, PLACE_INCLUDES, ""), call);
-      const failures: unknown[] = [];
-      let response: Response | undefined;
-      let requestId: string | undefined;
-      const answers = await pool(
-        request.ids,
-        LOOKUPS,
-        async (id): Promise<Result | undefined> => {
-          try {
-            const answer = await places<Result>({
-              ...shared,
-              path: `/v1/places/${encodeURIComponent(id)}`,
-              query,
-            }).withResponse();
-            response = answer.response;
-            requestId = answer.requestId;
-            return answer.data;
-          } catch (error) {
-            // An ID Google no longer knows answers nothing, like an ID that never matched.
-            if (error instanceof NotFoundError) return undefined;
-            throw error;
-          }
-        },
-        (error) => {
-          failures.push(error);
-          return undefined;
-        },
-      );
-      if (failures.length > 0) throw failures[0];
-      const found = answers.filter((answer) => answer !== undefined);
-      return {
-        results: found.map(toDetailedPlace),
-        attribution: credits(found),
-        // One body per ID found, since each ID is its own request.
-        raw: found,
-        response,
-        requestId,
-      };
-    },
-    errorCode(error) {
-      const failure = (error.body as ErrorBody | null | undefined)?.error;
-      // A rejected key answers 400 INVALID_ARGUMENT, which would read as a malformed request.
-      if (failure?.details?.some((detail) => detail.reason === "API_KEY_INVALID"))
-        return "unauthenticated";
-      return ERRORS.get(failure?.status ?? "");
+      location: (params, call) => {
+        const { fieldMask, locationQuery, ...rest } = params;
+        const inPath = locationQuery === undefined ? undefined : segment(locationQuery);
+        return get(
+          "geocode.location",
+          params,
+          () =>
+            inPath === undefined
+              ? { path: `${geocode}/v4/geocode/location`, query: { locationQuery, ...rest } }
+              : { path: `${geocode}/v4/geocode/location/${inPath}`, query: rest },
+          fieldMask,
+          call,
+        );
+      },
+      place: (params, call) => {
+        const { place, fieldMask, ...query } = params;
+        return get(
+          "geocode.place",
+          params,
+          () => ({
+            path: `${geocode}/v4/geocode/${resource(place, "place", "geocode.place")}`,
+            query,
+          }),
+          fieldMask,
+          call,
+        );
+      },
     },
   };
 }
