@@ -1,4 +1,3 @@
-import { Geocoder } from "@open-geocode/client";
-import { og } from "@open-geocode/client/og";
+import { createClient } from "@open-geocode/client";
 
-console.log(Geocoder, og);
+console.log(createClient);

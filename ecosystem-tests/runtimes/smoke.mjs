@@ -1,11 +1,10 @@
-// Imports the built packages by name and runs every adapter against a fake fetch.
+// Imports the built packages by name and runs every client against a fake fetch.
 // It runs under Node, Bun and Deno to prove the packages need no runtime-specific APIs.
-import { createAutocomplete, geocoderSource } from "@open-geocode/autocomplete-core";
-import { Geocoder, GeocoderError } from "@open-geocode/client";
+import { createAutocomplete, mapboxSource, ogSource } from "@open-geocode/autocomplete-core";
+import { createClient, GeocoderError } from "@open-geocode/client";
 import { google } from "@open-geocode/client/google";
 import { here } from "@open-geocode/client/here";
 import { mapbox } from "@open-geocode/client/mapbox";
-import { createClient, og } from "@open-geocode/client/og";
 import { cache, compare, failover } from "@open-geocode/client/plugins";
 import { precisely } from "@open-geocode/client/precisely";
 
@@ -36,6 +35,7 @@ const feature = {
     name: "24 Sussex Drive",
     label: "24 Sussex Drive, Ottawa",
     source: { dataset: "osm" },
+    timezone: "America/Toronto",
     context: { country: { id: "osm:relation:2", name: "Canada", code: "CA" } },
   },
 };
@@ -45,89 +45,115 @@ const collection = {
   features: [feature],
 };
 
-// The og adapter, with every plugin around it.
+// The og client, with every plugin around it.
 const local = fake(collection);
 const reports = [];
-const geo = new Geocoder({
-  adapter: og({ baseUrl: "http://og.test", fetch: local.fetch }),
+const og = createClient({
+  baseUrl: "http://og.test",
+  fetch: local.fetch,
   plugins: [
     cache(),
-    failover({ to: og({ baseUrl: "http://fallback.test", fetch: local.fetch }) }),
+    failover({ to: createClient({ baseUrl: "http://fallback.test", fetch: local.fetch }) }),
     compare({
-      with: og({ baseUrl: "http://candidate.test", fetch: local.fetch }),
+      with: createClient({ baseUrl: "http://candidate.test", fetch: local.fetch }),
       onReport: (report) => reports.push(report),
       wait: true,
     }),
   ],
 });
-const first = await geo.geocode("24 Sussex Drive", { include: ["context"] }).withResponse();
+const first = await og.geocode({ q: "24 Sussex Drive", include: ["timezone"] }).withResponse();
 check(first.requestId === "req-1", "request id is missing");
-check(first.data.results[0].address.countryCode === "CA", "og result was not normalised");
-check(first.data.results[0].context.country.code === "CA", "include was not honoured");
+check(first.server === "og", "the answering server is not named");
+check(first.data.features[0].properties.context.country.code === "CA", "og's shape was changed");
+check(first.data.features[0].properties.timezone === "America/Toronto", "include was not honoured");
 check(
   local.urls[0] === "http://og.test/geocode?q=24+Sussex+Drive",
   `unexpected URL ${local.urls[0]}`,
 );
 check(reports.length === 1 && reports[0].comparison.agree, "compare did not report");
-const second = await geo.geocode("24 Sussex Drive", { include: ["context"] }).withResponse();
+const second = await og.geocode({ q: "24 Sussex Drive", include: ["timezone"] }).withResponse();
 check(second.response === undefined, "the second call was not served from the cache");
+const lean = await og.geocode({ q: "24 Sussex Drive" });
+check(!("timezone" in lean.features[0].properties), "an extra came without being included");
 
-// Every vendor adapter answers an empty result in the same shape.
+// Every vendor client returns the server's JSON untouched, from og and from the vendor.
 const vendors = [
-  [google({ apiKey: "key", fetch: fake({ results: [] }).fetch }), "google"],
   [
-    mapbox({
-      accessToken: "token",
-      fetch: fake({ type: "FeatureCollection", features: [] }).fetch,
-    }),
-    "mapbox",
+    google,
+    { apiKey: "key" },
+    (client) => client.geocode.address({ addressQuery: "x" }),
+    "googleapis.com",
   ],
-  [here({ apiKey: "key", fetch: fake({ items: [] }).fetch }), "here"],
   [
-    precisely({
-      apiKey: "key",
-      apiSecret: "secret",
-      defaultCountry: "US",
-      fetch: fake({ responses: [{ status: "OK", results: [] }] }).fetch,
-    }),
-    "precisely",
+    mapbox,
+    { accessToken: "token" },
+    (client) => client.geocoding.forward({ q: "x" }),
+    "api.mapbox.com",
   ],
+  [here, { apiKey: "key" }, (client) => client.geocode({ q: "x" }), "hereapi.com"],
 ];
-for (const [adapter, name] of vendors) {
-  const result = await new Geocoder({ adapter }).geocode("10 King St W, Toronto");
-  check(result.provider === name, `${name} did not answer as itself`);
+for (const [create, credentials, call, host] of vendors) {
+  const body = { marker: create.name, nested: { untouched: [1, 2, 3] } };
+  const viaOg = fake(body);
+  const onOg = create({ baseUrl: "http://og.test", ...credentials, fetch: viaOg.fetch });
+  const answer = await call(onOg).withResponse();
+  check(JSON.stringify(answer.data) === JSON.stringify(body), `${create.name} changed the answer`);
+  check(answer.server === "og", `${create.name} did not name og as the server`);
   check(
-    Array.isArray(result.results) && result.results.length === 0,
-    `${name} result is malformed`,
+    viaOg.urls[0].startsWith(`http://og.test/compat/${create.name}/`),
+    `${create.name} asked og at ${viaOg.urls[0]}`,
   );
-  check(Array.isArray(result.unavailable), `${name} lists no unavailable fields`);
+  check(!/key|token/.test(viaOg.urls[0]), `${create.name} sent its credential to og`);
+  const direct = fake(body);
+  const onVendor = create({ ...credentials, fetch: direct.fetch });
+  check((await call(onVendor).withResponse()).server === create.name, `${create.name} server`);
+  check(direct.urls[0].includes(host), `${create.name} asked ${direct.urls[0]}`);
 }
-
-// One error class, whatever the provider.
-const failing = new Geocoder({
-  adapter: mapbox({
-    accessToken: "token",
-    fetch: fake({ message: "Not Authorized" }, 401).fetch,
-    logLevel: "off",
-  }),
+const viaOg = fake({ responses: [] });
+await precisely({ baseUrl: "http://og.test", fetch: viaOg.fetch }).geocode({
+  addresses: [{ addressLines: ["x"], country: "US" }],
 });
-const error = await failing.geocode("x").catch((thrown) => thrown);
 check(
-  error instanceof GeocoderError && error.code === "unauthenticated",
-  "errors are not normalised",
+  viaOg.urls.length === 1 && viaOg.urls[0] === "http://og.test/compat/precisely/v1/geocode",
+  `precisely asked og at ${viaOg.urls}`,
 );
 
-// og's native client and the headless autocomplete.
-const native = await createClient({ baseUrl: "http://og.test", fetch: local.fetch }).geocode({
-  q: "x",
+// One error class, whichever client.
+const failing = mapbox({
+  accessToken: "token",
+  fetch: fake({ message: "Not Authorized" }, 401).fetch,
+  logLevel: "off",
 });
-check(native.features.length === 1, "the native client failed");
-const source = geocoderSource(geo, { limit: 5 });
-const autocomplete = createAutocomplete({ ...source, debounce: 0 });
+const error = await failing.geocoding.forward({ q: "x" }).catch((thrown) => thrown);
+check(
+  error instanceof GeocoderError && error.code === "unauthenticated" && error.provider === "mapbox",
+  "errors are not normalised",
+);
+let refused;
+try {
+  here({
+    apiKey: "key",
+    plugins: [compare({ with: here({ baseUrl: "http://og.test" }), onReport() {} })],
+  });
+} catch (thrown) {
+  refused = thrown;
+}
+check(refused?.code === "unsupported", "a comparison with HERE was not refused");
+
+// The headless autocomplete, fed by the og client and by a vendor client.
+const autocomplete = createAutocomplete({ ...ogSource(og, { limit: 5 }), debounce: 0 });
 autocomplete.onInput("24 Sussex");
 await new Promise((resolve) => setTimeout(resolve, 20));
 check(autocomplete.getState().items.length === 1, "the autocomplete got no suggestions");
 autocomplete.destroy();
+const suggested = await mapboxSource(
+  mapbox({
+    baseUrl: "http://og.test",
+    fetch: fake({ suggestions: [{ mapbox_id: "a", name: "Casino", place_formatted: "Monaco" }] })
+      .fetch,
+  }),
+).getItems("cas", { signal: new AbortController().signal });
+check(suggested[0].label === "Casino, Monaco", "the mapbox source got no suggestions");
 
 // Timeouts and cancellation against a real server and the runtime's own fetch,
 // since each runtime reports a signal that fired in its own way.
@@ -139,18 +165,16 @@ const server = createServer((request, response) => {
   if (!request.url.startsWith("/geocode")) response.end(JSON.stringify(collection));
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const real = new Geocoder({
-  adapter: og({
-    baseUrl: `http://127.0.0.1:${server.address().port}`,
-    maxRetries: 0,
-    logLevel: "off",
-  }),
+const real = createClient({
+  baseUrl: `http://127.0.0.1:${server.address().port}`,
+  maxRetries: 0,
+  logLevel: "off",
 });
 try {
-  const answered = await real.places("x");
-  check(answered.results.length === 1, "the real server did not answer");
+  const answered = await real.places({ q: "x" });
+  check(answered.features.length === 1, "the real server did not answer");
 
-  const slow = await real.geocode("x", { timeout: 150 }).catch((thrown) => thrown);
+  const slow = await real.geocode({ q: "x" }, { timeout: 150 }).catch((thrown) => thrown);
   check(slow instanceof GeocoderError && slow.code === "timeout", `a timeout read as ${slow.code}`);
   check(
     slow.cause?.cause?.name === "TimeoutError",
@@ -159,7 +183,9 @@ try {
 
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 100);
-  const stopped = await real.geocode("x", { signal: controller.signal }).catch((thrown) => thrown);
+  const stopped = await real
+    .geocode({ q: "x" }, { signal: controller.signal })
+    .catch((thrown) => thrown);
   check(
     stopped instanceof GeocoderError && stopped.code === "aborted",
     `an abort read as ${stopped.code}`,
@@ -170,7 +196,7 @@ try {
   );
 
   const own = await real
-    .geocode("x", { signal: AbortSignal.timeout(100) })
+    .geocode({ q: "x" }, { signal: AbortSignal.timeout(100) })
     .catch((thrown) => thrown);
   check(
     own instanceof GeocoderError && own.code === "timeout",
@@ -181,7 +207,7 @@ try {
   const racing = new AbortController();
   setTimeout(() => racing.abort(), 50);
   const raced = await real
-    .geocode("x", { signal: racing.signal, timeout: 400 })
+    .geocode({ q: "x" }, { signal: racing.signal, timeout: 400 })
     .catch((thrown) => thrown);
   check(raced.code === "aborted", `an abort before the timeout read as ${raced.code}`);
 } finally {

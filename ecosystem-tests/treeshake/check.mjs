@@ -1,5 +1,5 @@
-// Bundles an app that imports one adapter, and fails if another provider's code came along.
-// Each provider is recognised by the host name its adapter calls.
+// Bundles an app that imports one client, and fails if another vendor's code came along.
+// Each vendor is recognised by the host name its client calls.
 import { build } from "vite";
 
 const HOSTS = {
@@ -8,7 +8,7 @@ const HOSTS = {
   here: "hereapi.com",
   precisely: "cloud.precisely.com",
 };
-// og calls no fixed host, so it is recognised by the job endpoint of its native client.
+// og calls no fixed host, so it is recognised by the job upload of its own client.
 const OG = "respond-async";
 
 const CASES = ["og", "google", "mapbox", "here", "precisely", "plugins", "widget"];

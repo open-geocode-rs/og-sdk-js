@@ -21,8 +21,7 @@
     "size": "size-limit",
     "docs": "typedoc",
     "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn && cd ../treeshake && node check.mjs && cd ../runtimes && node smoke.mjs && bun smoke.mjs && bunx deno run --allow-read --allow-env --allow-net=127.0.0.1 smoke.mjs",
-    "docs:capabilities": "bun packages/client/scripts/write-capabilities.ts && oxfmt packages/client/README.md",
-    "docs:page": "bun packages/client/scripts/capabilities-page.ts"
+    "docs:page": "bun packages/client/scripts/docs-page.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
@@ -45,64 +44,34 @@
   },
   "size-limit": [
     {
-      "name": "Geocoder with the og adapter",
-      "path": [
-        "packages/client/dist/index.js",
-        "packages/client/dist/og.js"
-      ],
-      "import": {
-        "packages/client/dist/index.js": "{ Geocoder }",
-        "packages/client/dist/og.js": "{ og }"
-      },
-      "limit": "7.6 kB"
+      "name": "the og client",
+      "path": "packages/client/dist/index.js",
+      "import": "{ createClient }",
+      "limit": "4.3 kB"
     },
     {
-      "name": "Geocoder with the google adapter",
-      "path": [
-        "packages/client/dist/index.js",
-        "packages/client/dist/google.js"
-      ],
-      "import": {
-        "packages/client/dist/index.js": "{ Geocoder }",
-        "packages/client/dist/google.js": "{ google }"
-      },
-      "limit": "8.5 kB"
+      "name": "the google client",
+      "path": "packages/client/dist/google.js",
+      "import": "{ google }",
+      "limit": "4.5 kB"
     },
     {
-      "name": "Geocoder with the mapbox adapter",
-      "path": [
-        "packages/client/dist/index.js",
-        "packages/client/dist/mapbox.js"
-      ],
-      "import": {
-        "packages/client/dist/index.js": "{ Geocoder }",
-        "packages/client/dist/mapbox.js": "{ mapbox }"
-      },
-      "limit": "8 kB"
+      "name": "the mapbox client",
+      "path": "packages/client/dist/mapbox.js",
+      "import": "{ mapbox }",
+      "limit": "4 kB"
     },
     {
-      "name": "Geocoder with the here adapter",
-      "path": [
-        "packages/client/dist/index.js",
-        "packages/client/dist/here.js"
-      ],
-      "import": {
-        "packages/client/dist/index.js": "{ Geocoder }",
-        "packages/client/dist/here.js": "{ here }"
-      },
-      "limit": "10.5 kB"
+      "name": "the here client",
+      "path": "packages/client/dist/here.js",
+      "import": "{ here }",
+      "limit": "5 kB"
     },
     {
-      "name": "Geocoder with the precisely adapter",
-      "path": [
-        "packages/client/dist/index.js",
-        "packages/client/dist/precisely.js"
-      ],
-      "import": {
-        "packages/client/dist/index.js": "{ Geocoder }",
-        "packages/client/dist/precisely.js": "{ precisely }"
-      },
-      "limit": "9.8 kB"
+      "name": "the precisely client",
+      "path": "packages/client/dist/precisely.js",
+      "import": "{ precisely }",
+      "limit": "5 kB"
     },
     {
       "name": "failover, cache and compare",
@@ -111,27 +80,21 @@
       "limit": "2.7 kB"
     },
     {
-      "name": "og's native client alone",
-      "path": "packages/client/dist/og.js",
-      "import": "{ createClient }",
-      "limit": "2.8 kB"
-    },
-    {
       "name": "@open-geocode/autocomplete-core",
       "path": "packages/autocomplete-core/dist/index.js",
       "import": "{ createAutocomplete }",
       "limit": "1 kB"
     },
     {
-      "name": "@open-geocode/autocomplete-core with geocoderSource",
+      "name": "@open-geocode/autocomplete-core with ogSource",
       "path": "packages/autocomplete-core/dist/index.js",
-      "import": "{ createAutocomplete, geocoderSource }",
+      "import": "{ createAutocomplete, ogSource }",
       "limit": "1.2 kB"
     },
     {
       "name": "@open-geocode/autocomplete (CDN file)",
       "path": "packages/autocomplete/dist/og-autocomplete.iife.js",
-      "limit": "9.8 kB"
+      "limit": "7 kB"
     }
   ]
 }

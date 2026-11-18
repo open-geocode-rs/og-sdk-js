@@ -28,11 +28,9 @@ jobs:
         run: bun run size
       - name: API reference builds without warnings
         run: bun run docs
-      - name: README provider tables match the adapters
-        run: bun run docs:capabilities && git diff --exit-code packages/client/README.md
       - name: Bundles in a real Vite app
         run: cd ecosystem-tests/vite && bunx vite build --logLevel warn
-      - name: An adapter pulls in no other provider
+      - name: A client pulls in no other vendor
         run: node ecosystem-tests/treeshake/check.mjs
       - name: Install browsers
         run: bunx playwright install --with-deps chromium firefox webkit
