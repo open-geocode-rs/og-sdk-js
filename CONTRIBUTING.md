@@ -11,7 +11,9 @@ Package code must not use APIs that exist only in Node, Bun or Deno.
 An adapter translates one provider's API to the unified format in `packages/client/src/types.ts` and does nothing else.
 It never makes up a value.
 A field the provider did not send is `null`, and a field or option the provider cannot serve is left out of the adapter's `capabilities`.
-Its tests replay the provider's documented responses, kept verbatim under `packages/client/test/fixtures`, so do not tidy those files.
+Its tests replay responses in the provider's documented shape, kept under `packages/client/test/fixtures`.
+Those fixtures are synthetic, so every value in a new one must be made up, never copied from a provider's documentation.
+The Google fixtures are the one exception, credited in `packages/client/test/fixtures/google/NOTICE.md`.
 Run `bun run docs:capabilities` after changing an adapter's `capabilities`, since the README's provider tables are built from them.
 Run `bun run test:ecosystem` to check that an adapter still pulls in no other provider's code.
 

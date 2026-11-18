@@ -173,7 +173,8 @@ bun run test:ecosystem # build a real Vite app, and run the packages under Node,
 bun run gen            # regenerate og's types from og's contract
 ```
 
-The vendor adapters are tested by replaying each vendor's documented responses, kept verbatim under `packages/client/test/fixtures`.
+The vendor adapters are tested by replaying responses in each vendor's documented shape, kept under `packages/client/test/fixtures`.
+The fixtures are synthetic, with every value made up, except Google's, which are documentation examples credited in `packages/client/test/fixtures/google/NOTICE.md`.
 Two kinds of test call a real service, and both are skipped unless you set their variables.
 
 ```sh
