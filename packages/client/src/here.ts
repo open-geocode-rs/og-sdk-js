@@ -233,7 +233,18 @@ interface HereItem {
   countryInfo?: { alpha2?: string };
   secondaryUnitInfo?: { normalizedUnitType?: string }[];
   highlights?: { title?: HereRange[]; address?: { label?: HereRange[] } };
+  localizedNames?: Partial<Record<LocalizedKey, { value?: string; language?: string }[]>>;
 }
+
+type LocalizedKey =
+  | "placeNames"
+  | "countryNames"
+  | "stateNames"
+  | "countyNames"
+  | "cityNames"
+  | "districtNames"
+  | "subdistrictNames"
+  | "streetNames";
 
 interface HereItems {
   items?: HereItem[];
@@ -267,6 +278,7 @@ const SEARCH_FIELDS: readonly FieldName[] = [
   "categories",
   "timezone",
   "accessPoints",
+  "translations",
 ];
 const POI_FIELDS: readonly FieldName[] = ["brand", "contact", "openingHours"];
 const SEARCH: readonly OptionName[] = [
@@ -483,6 +495,60 @@ function accuracyOf(item: HereItem): Accuracy | null {
   }
 }
 
+/**
+ * The further display languages HERE can name a result in, beside the language that renders it.
+ * HERE's `lang` list only picks the one language an answer is written in, so it yields no translations.
+ */
+const LOCALIZED: readonly string[] = ["ja-Hira"];
+
+/** `lang` as HERE's list, and the further languages asked for that HERE can also name the result in. */
+function languages(request: { language?: string[]; include: Include[] }): {
+  lang?: string;
+  showLocalizedNames?: string;
+} {
+  const all = request.language ?? [];
+  if (all.length === 0) return {};
+  const further = request.include.includes("translations")
+    ? LOCALIZED.filter((code) =>
+        all.slice(1).some((asked) => asked.toLowerCase() === code.toLowerCase()),
+      )
+    : [];
+  return {
+    lang: all.join(","),
+    ...(further.length > 0 ? { showLocalizedNames: further.join(",") } : {}),
+  };
+}
+
+/** The list of `localizedNames` that holds the result's own name. A result whose name is put together from parts has none. */
+function ownNames(item: HereItem): LocalizedKey | undefined {
+  switch (item.resultType?.toLowerCase()) {
+    case "place":
+      return "placeNames";
+    case "street":
+      return "streetNames";
+    case "locality":
+      return (
+        { city: "cityNames", district: "districtNames", subdistrict: "subdistrictNames" } as const
+      )[item.localityType?.toLowerCase() ?? ""];
+    case "administrativearea":
+      return ({ country: "countryNames", state: "stateNames", county: "countyNames" } as const)[
+        item.administrativeAreaType?.toLowerCase() ?? ""
+      ];
+    default:
+      return undefined;
+  }
+}
+
+/** The result's name in each further language HERE sent it in, by language code. */
+function translationsOf(item: HereItem): Record<string, string> | null {
+  const key = ownNames(item);
+  const names = key === undefined ? undefined : item.localizedNames?.[key];
+  const entries = (names ?? []).flatMap((name) =>
+    name.language && name.value ? [[name.language, name.value] as const] : [],
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
 /** The short name. HERE's `title` is the whole label for an address or an area, so the part is read from the address. */
 function nameOf(item: HereItem, type: PlaceType): string {
   const address = item.address ?? {};
@@ -644,6 +710,7 @@ function toPlace(item: HereItem): PlaceRecord {
       item.access?.map((point) => ({ lat: point.lat, lon: point.lng, kind: text(point.type) })) ??
       null,
     match: item.scoring ? matchOf(item.scoring) : null,
+    translations: translationsOf(item),
     // The ranges must index `label`, which is the address label when HERE sent one, else the title.
     highlights: ranges(label === null ? item.highlights?.title : item.highlights?.address?.label),
     raw: item,
@@ -1062,7 +1129,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
           at: at(request.focus),
           in: countryFilter(request.countries, "geocode"),
           types: nativeTypes(request.types, TYPES.geocode),
-          lang: request.language?.[0],
+          ...languages(request),
           limit: limitOf(request, 100),
           show: show(request.include, SHOWN.geocode),
         },
@@ -1076,7 +1143,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
         {
           at: `${request.point.lat},${request.point.lon}`,
           types: nativeTypes(request.types, TYPES.revgeocode),
-          lang: request.language?.[0],
+          ...languages(request),
           limit: limitOf(request, 100),
           show: show(request.include, SHOWN.revgeocode),
         },
@@ -1096,7 +1163,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
                 q: request.query,
                 in: countryFilter(request.countries, "autocomplete"),
                 types: nativeTypes(request.types, TYPES.autocomplete),
-                lang: request.language?.[0],
+                ...languages(request),
                 limit: limitOf(request, 20),
                 show: show(request.include, SHOWN.autocomplete),
               },
@@ -1107,7 +1174,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
               {
                 q: request.query,
                 ...where,
-                lang: request.language?.[0],
+                ...languages(request),
                 limit: limitOf(request, 100),
                 // Without `details` a suggestion carries only its label, and no country to filter by.
                 show: show(request.include, SHOWN.autosuggest, within ? ["details"] : []),
@@ -1128,7 +1195,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
         {
           q: request.query,
           ...where,
-          lang: request.language?.[0],
+          ...languages(request),
           limit: limitOf(request, 100),
           show: show(request.include, SHOWN.discover),
         },
@@ -1144,7 +1211,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
         (id) =>
           search<HereItem>(
             "lookup",
-            { id, lang: request.language?.[0], show: show(request.include, SHOWN.lookup) },
+            { id, ...languages(request), show: show(request.include, SHOWN.lookup) },
             call,
           ),
         // HERE answers 404 for an ID it does not know, which is no failure of the lookup.
@@ -1181,7 +1248,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
             at: at(request.focus),
             in: countryFilter(request.countries, "batch.geocode"),
             types: nativeTypes(request.types, TYPES.geocode),
-            lang: request.language?.[0],
+            lang: languages(request).lang,
             // Left out, the Batch API answers one result per record.
             limit: limitOf(request, 100),
             show: show(request.include, SHOWN.geocode),
@@ -1197,7 +1264,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
           items.map((item) => [`${item.lat},${item.lon}`]),
           {
             types: nativeTypes(request.types, TYPES.revgeocode),
-            lang: request.language?.[0],
+            lang: languages(request).lang,
             limit: limitOf(request, 100),
             show: show(request.include, SHOWN.revgeocode),
           },

@@ -57,6 +57,51 @@ function geocoder(
 }
 
 const GEOCODE = "https://geocode.search.hereapi.com/v1/geocode";
+
+describe("translations", () => {
+  it("asks for the further language HERE can name a result in, and maps the result's own name", async () => {
+    const { geo, calls } = geocoder(() => ({ body: json("geocode-localized.json") }));
+    const result = await geo.geocode("皆原市", {
+      language: ["ja", "ja-Hira", "en"],
+      include: ["translations"],
+    });
+    const query = new URL(calls[0]!.url).searchParams;
+    expect(query.get("lang")).toBe("ja,ja-Hira,en");
+    // `en` is in the list too, but HERE names a result in a second language only for the ones it lists.
+    expect(query.get("showLocalizedNames")).toBe("ja-Hira");
+    expect(result.results[0]!.type).toBe("locality");
+    expect(result.results[0]!.translations).toEqual({ "ja-Hira": "みなはらし" });
+    // An address's name is put together from a number and a street, so it has no name to translate.
+    expect(result.results[1]!.type).toBe("address");
+    expect(result.results[1]!.translations).toBeNull();
+    expect(result.unavailable).not.toContain("translations");
+  });
+
+  it("sends the list alone when no further name is asked for or none can be given", async () => {
+    const { geo, calls } = geocoder(() => ({ body: json("geocode-localized.json") }));
+    await geo.geocode("皆原市", { language: ["ja", "ja-Hira"] });
+    await geo.geocode("皆原市", { language: ["ja", "en"], include: ["translations"] });
+    await geo.geocode("皆原市", { language: ["ja-Hira", "ja"], include: ["translations"] });
+    await geo.reverse(
+      { lat: 40.7, lon: 140.9 },
+      { language: ["ja", "ja-hira"], include: ["translations"] },
+    );
+    const sent = calls.map((call) => new URL(call.url).searchParams);
+    expect(sent.map((query) => query.get("lang"))).toEqual([
+      "ja,ja-Hira",
+      "ja,en",
+      "ja-Hira,ja",
+      "ja,ja-hira",
+    ]);
+    expect(sent.map((query) => query.get("showLocalizedNames"))).toEqual([
+      null,
+      null,
+      // The first language already writes the answer, so it is no further name.
+      null,
+      "ja-Hira",
+    ]);
+  });
+});
 const BATCH = "https://batch.search.hereapi.com/v7/batch/jobs";
 const JOB = "JOB-3e7c41d9-62ab-4f05-9b18-c0d5a7e2f643";
 
@@ -167,7 +212,7 @@ describe("geocode", () => {
       at: "44.2,-78.6",
       in: "countryCode:CAN,USA",
       types: "houseNumber,street",
-      lang: "fr",
+      lang: "fr,en",
       limit: "100",
       show: "countryInfo,secondaryUnitInfo,streetInfo,tz",
       apiKey: "KEY",
