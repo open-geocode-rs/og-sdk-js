@@ -251,7 +251,26 @@ const geocoding = (fields: readonly FieldName[]): OperationCapabilities["fields"
   ...fields,
 ];
 
-function area(layer: Layer | undefined, code?: string): ContextArea | null {
+/**
+ * A layer's name in each further language asked for, by language code.
+ * Mapbox lists every language asked for, the first among them, and the first already names the layer.
+ */
+function translated(
+  layer: Layer | undefined,
+  first: string | undefined,
+): Record<string, string> | null {
+  if (layer?.translations === undefined) return null;
+  const names = Object.entries(layer.translations).flatMap(([language, { name }]) =>
+    name === undefined || language.toLowerCase() === first?.toLowerCase() ? [] : [[language, name]],
+  );
+  return names.length > 0 ? (Object.fromEntries(names) as Record<string, string>) : null;
+}
+
+function area(
+  layer: Layer | undefined,
+  first: string | undefined,
+  code?: string,
+): ContextArea | null {
   const name = text(layer?.name);
   if (layer === undefined || name === null) return null;
   return {
@@ -260,13 +279,7 @@ function area(layer: Layer | undefined, code?: string): ContextArea | null {
     id: text(layer.mapbox_id) ?? text(layer.id),
     code: text(code),
     wikidata: text(layer.wikidata_id),
-    translations: layer.translations
-      ? Object.fromEntries(
-          Object.entries(layer.translations).flatMap(([language, { name: translated }]) =>
-            translated === undefined ? [] : [[language, translated]],
-          ),
-        )
-      : null,
+    translations: translated(layer, first),
   };
 }
 
@@ -329,10 +342,20 @@ function label(p: Properties, name: string): string {
 
 /**
  * One feature or suggestion as a place.
- * `position` is the feature's GeoJSON point.
+ * `position` is the feature's GeoJSON point, and `first` the language that names the answer.
  */
-function toPlace(p: Properties, raw: unknown, position?: readonly number[]): PlaceRecord {
+function toPlace(
+  p: Properties,
+  raw: unknown,
+  position?: readonly number[],
+  first?: string,
+): PlaceRecord {
   const around = p.context ?? {};
+  // An area's own names in other languages are on its entry in its own context, found by its ID.
+  const self =
+    p.mapbox_id === undefined
+      ? undefined
+      : Object.values(around).find((layer) => layer?.mapbox_id === p.mapbox_id);
   const precision = p.coordinates?.accuracy;
   const type: PlaceType =
     p.feature_type === "street" && precision === "intersection"
@@ -361,12 +384,12 @@ function toPlace(p: Properties, raw: unknown, position?: readonly number[]): Pla
   address.countryCode = text(around.country?.country_code)?.toUpperCase() ?? null;
 
   const context: Context = {
-    neighbourhood: area(around.neighborhood),
-    sublocality: area(around.locality),
-    locality: area(around.place),
-    district: area(around.district),
-    region: area(around.region, around.region?.region_code_full),
-    country: area(around.country, address.countryCode ?? undefined),
+    neighbourhood: area(around.neighborhood, first),
+    sublocality: area(around.locality, first),
+    locality: area(around.place, first),
+    district: area(around.district, first),
+    region: area(around.region, first, around.region?.region_code_full),
+    country: area(around.country, first, address.countryCode ?? undefined),
   };
   const points = p.coordinates?.routable_points;
   return {
@@ -397,6 +420,7 @@ function toPlace(p: Properties, raw: unknown, position?: readonly number[]): Pla
         }))
       : null,
     match: match(p.match_code),
+    translations: translated(self, first),
     categories: categories(p.poi_category, p.poi_category_ids),
     brand: brand(p.brand, p.brand_id),
     contact: contact(p.metadata),
@@ -416,7 +440,9 @@ function toPlaces(
 ): PlaceRecord[] {
   const places = records
     .filter((record) => !NOT_PLACES.has(record.properties.feature_type))
-    .map((record) => toPlace(record.properties, record.raw, record.position));
+    .map((record) =>
+      toPlace(record.properties, record.raw, record.position, request.language?.[0]),
+    );
   const { types } = request;
   // Mapbox's types are coarser than the unified ones, so the exact filter is applied here.
   return types === undefined ? places : places.filter((place) => types.includes(place.type));
@@ -593,11 +619,11 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
     capabilities: {
       geocode: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "structured"],
-        fields: geocoding(["match"]),
+        fields: geocoding(["match", "translations"]),
       },
       reverse: {
         options: ["limit", "language", "countries", "types"],
-        fields: geocoding([]),
+        fields: geocoding(["translations"]),
       },
       autocomplete: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "session"],

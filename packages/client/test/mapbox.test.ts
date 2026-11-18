@@ -263,14 +263,58 @@ describe("geocode", () => {
       id: "dXJuOm1ieHBsYzpCeVJu",
       code: "DE-BY",
       wikidata: "Q939172650",
-      translations: { en: "Bavaria", es: "Baviera" },
+      // The first language already names the area, so only the further one is a translation.
+      translations: { es: "Baviera" },
     });
-    expect(context.country?.translations).toEqual({ en: "Germany", es: "Alemania" });
-    expect(context.neighbourhood?.translations).toEqual({
-      en: "Hopfenanger",
-      es: "Hopfenanger",
-    });
+    expect(context.country?.translations).toEqual({ es: "Alemania" });
+    expect(context.neighbourhood?.translations).toEqual({ es: "Hopfenanger" });
     expect(context.district).toBeNull();
+  });
+
+  it("fills a result's own translations from its entry in its own context", async () => {
+    const { context } = fixture("geocoding-context-translations");
+    const region = {
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [11.4, 48.9] },
+      properties: {
+        mapbox_id: context.region.mapbox_id,
+        feature_type: "region",
+        name: "Bavaria",
+        place_formatted: "Germany",
+        // A feature is listed in its own context, under its own ID.
+        context: { region: context.region, country: context.country },
+      },
+    };
+    const street = fixture("geocoding-forward").features[0];
+    street.properties.context = context;
+    const fetch = fakeFetch({ body: { type: "FeatureCollection", features: [region, street] } });
+    const geo = geocoder(fetch);
+
+    const forward = await geo.geocode("Bavaria", {
+      language: ["en", "es", "fr"],
+      include: ["translations"],
+    });
+    expect(sent(fetch).url).toContain("&language=en%2Ces%2Cfr&");
+    expect(forward.results[0]!.translations).toEqual({ es: "Baviera" });
+    // An address has no name of its own in another language, though its areas do.
+    expect(forward.results[1]!.translations).toBeNull();
+    expect(forward.unavailable).not.toContain("translations");
+
+    const back = await geo.reverse(
+      { lat: 48.9, lon: 11.4 },
+      { language: ["es", "en"], include: ["translations"] },
+    );
+    expect(sent(fetch, 1).url).toContain("&language=es%2Cen&");
+    // The first language asked for is the one left out, whichever it is.
+    expect(back.results[0]!.translations).toEqual({ en: "Bavaria" });
+    expect(back.unavailable).not.toContain("translations");
+
+    // Search Box names a result in one language only, so it has no translations to give.
+    const places = await geo.places("Bavaria", {
+      language: ["en", "es"],
+      include: ["translations"],
+    });
+    expect(places.unavailable).toContain("translations");
   });
 
   it("maps units, sublocalities, boxes and routable points", async () => {
