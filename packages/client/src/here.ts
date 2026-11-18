@@ -12,6 +12,7 @@ import {
   type AdapterBatchItem,
   type AdapterOptions,
   type AdapterResult,
+  type CacheRule,
   type BatchContext,
   createTransport,
   emptyAddress,
@@ -29,6 +30,7 @@ import { BadRequestError, GeocoderError, NotFoundError, OgError } from "./errors
 import { alpha2, alpha3 } from "./iso.ts";
 import type {
   Accuracy,
+  Attribution,
   BaseRequest,
   FieldName,
   Include,
@@ -297,6 +299,7 @@ const CAPABILITIES: {
   places: OperationCapabilities;
   lookup: OperationCapabilities;
   batch: { geocode: boolean; reverse: boolean };
+  cache: CacheRule;
 } = {
   geocode: {
     // `in` takes only country codes on `/geocode`, so `bounds` cannot be sent.
@@ -320,6 +323,8 @@ const CAPABILITIES: {
     ],
   },
   batch: { geocode: true, reverse: true },
+  // What HERE's terms let a customer keep is not verified, so nothing is kept until it is.
+  cache: { maxTtl: 0 },
 };
 
 /** The `show` values each `include` field needs. `always` is asked for wherever the endpoint has it. */
@@ -717,6 +722,15 @@ function toPlace(item: HereItem): PlaceRecord {
   };
 }
 
+/**
+ * The notice HERE asks for where its data is shown, with the current year.
+ * HERE documents this form for its map data, and no separate wording for search results.
+ * See https://docs.here.com/map-rendering/docs/required-copyright-notice.
+ */
+function credits(): Attribution[] {
+  return [{ text: `© ${new Date().getFullYear()} HERE`, url: null, licence: null }];
+}
+
 /** A structured address as HERE's qualified query. */
 function qualified(address: StructuredAddress): string | undefined {
   const line = address.address !== undefined;
@@ -883,6 +897,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
         within === undefined
           ? places
           : places.filter((place) => within.includes(place.address.countryCode ?? "")),
+      attribution: credits(),
       raw: answer.data,
       response: answer.response,
       requestId: transport.requestId(answer.response.headers),
@@ -1226,6 +1241,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
       const response = found.at(-1)?.response;
       return {
         results: found.map((answer) => toPlace(answer.data)),
+        attribution: credits(),
         // One body per ID found, since HERE looks up one ID per request.
         raw: found.map((answer) => answer.data),
         response,

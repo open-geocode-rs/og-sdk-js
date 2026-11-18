@@ -990,6 +990,8 @@ export function precisely(options: PreciselyOptions): Adapter<PreciselyNative> {
       },
       lookup: { options: [], fields: GEOCODE_FIELDS },
       batch: { geocode: true, reverse: true },
+      // What Precisely's terms let a customer keep is not verified, so nothing is kept until it is.
+      cache: { maxTtl: 0 },
     },
     async geocode(request, call) {
       const country = countryOf(request, "geocode", request.address?.country);

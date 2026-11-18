@@ -162,6 +162,7 @@ describe("geocode", () => {
           highlights: null,
         },
       ],
+      // Precisely's public documentation states no credit a customer must show with a result, so none is made up.
       attribution: [],
       unavailable: ["confidence", "distance", "highlights"],
       ignored: ["language", "bounds"],
@@ -726,6 +727,11 @@ const shaped = (place: { name: string; label: string; address: object } | undefi
   expect(typeof place!.label).toBe("string");
   expect(Object.keys(place!.address)).toHaveLength(11);
 };
+
+it("lets a cache keep none of Precisely's answers until its terms are checked", () => {
+  const geo = geocoder(fakeFetch({ body: {} }));
+  expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
+});
 
 describe.skipIf(!key || !secret)("live", () => {
   it("geocodes", async () => {

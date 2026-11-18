@@ -160,7 +160,10 @@ describe("geocode", () => {
           rating: null,
         },
       ],
-      attribution: [],
+      // HERE's notice has the form `© 20XX HERE`, with the current year.
+      // Source: https://docs.here.com/map-rendering/docs/required-copyright-notice. HERE documents it for map data,
+      // and states no separate wording for search results.
+      attribution: [{ text: `© ${new Date().getFullYear()} HERE`, url: null, licence: null }],
       unavailable: ["rating"],
       ignored: [],
     });
@@ -962,6 +965,11 @@ describe("native", () => {
       `POST ${BATCH}?serviceHrn=hrn%3Ahere%3Aservice%3A%3Aolp-here%3Asearch-lookup-7&outputColumns=position%7Ctitle&tag=t&apiKey=KEY`,
     ]);
   });
+});
+
+it("lets a cache keep none of HERE's answers until its terms are checked", () => {
+  const { geo } = geocoder(() => ({ body: { items: [] } }));
+  expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
 });
 
 describe.skipIf(!process.env["HERE_API_KEY"])("live", () => {
