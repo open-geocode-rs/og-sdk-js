@@ -307,11 +307,21 @@ try {
 `error.cause` is one of the status classes (`BadRequestError`, `RateLimitError`, `APIConnectionTimeoutError` and so on), and its `body` is the provider's error in the provider's own shape.
 `GeocoderError` extends `OgError`, the base class of them all.
 
+Log `code`, `message` and `requestId`, not the whole error.
+`cause` and `headers` can hold request IDs and provider details that do not belong in a log.
+
+A call ends as `timeout` when its timeout fires, and as `aborted` when your `signal` does.
+Which signal fired decides, so the answer is the same in every runtime.
+A `signal` of your own made with `AbortSignal.timeout()` counts as a timeout.
+In both cases `error.cause.cause` is the signal's own reason, a `DOMException` named `TimeoutError` or `AbortError`.
+An aborted call is never retried, and an abort ends a retry wait, a batch or a job poll at once.
+
 ## Retries, timeouts and request IDs
 
 Requests that fail with a connection error, a timeout, 408, 429 or a 5xx are retried twice by default, with exponential backoff that honours `retry-after`.
 `autocomplete` is never retried unless you ask, since a retried keystroke is already stale.
 Requests time out after 60 seconds by default.
+A `timeout` of `Infinity` sets no limit.
 Set both on the adapter, on the `Geocoder`, or on one call.
 
 ```ts
