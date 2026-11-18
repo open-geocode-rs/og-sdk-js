@@ -82,6 +82,8 @@ describe("geocode", () => {
     expect(result.unavailable).toEqual(["confidence"]);
     expect(result.ignored).toEqual([]);
     expect(result.raw).toEqual(body);
+    // Mapbox sends the credit to show in each answer's own `attribution`, with the link in brackets.
+    // Source: the `attribution` property in https://docs.mapbox.com/api/search/geocoding/.
     expect(result.attribution).toEqual([
       { text: body.attribution, url: "https://www.mapbox.com/about/maps/", licence: null },
     ]);
@@ -955,6 +957,48 @@ describe("native", () => {
 });
 
 const token = process.env.MAPBOX_ACCESS_TOKEN;
+
+describe("storing answers", () => {
+  // Mapbox answers are for temporary use unless a call is sent with `permanent=true`.
+  // Source: https://docs.mapbox.com/api/search/geocoding/#storing-geocoding-results.
+  it("asks for temporary answers by default, and lets a cache keep none", async () => {
+    const fetch = fakeFetch({ body: fixture("geocoding-forward") });
+    const geo = geocoder(fetch);
+    await geo.geocode("418 Tannery Row");
+    expect(sent(fetch).url).not.toContain("permanent");
+    expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
+    for (const operation of ["geocode", "reverse", "autocomplete", "places", "lookup"] as const)
+      expect(geo.capabilities[operation]?.cache).toBeUndefined();
+  });
+
+  it("asks for permanent answers when told to, and lets a cache keep those alone", async () => {
+    const fetch = fakeFetch(
+      { body: fixture("geocoding-forward") },
+      { body: fixture("geocoding-forward") },
+      { body: fixture("geocoding-batch") },
+      { body: fixture("searchbox-forward") },
+    );
+    const geo = new Geocoder({
+      adapter: mapbox({ accessToken: "tok", fetch, permanent: true, logLevel: "off" }),
+    });
+    await geo.geocode("418 Tannery Row");
+    await geo.reverse({ lat: 44.3, lon: -72.6 });
+    await geo.batch.geocode(["418 Tannery Row"]);
+    await geo.places("coffee");
+    expect(new URL(sent(fetch, 0).url).searchParams.get("permanent")).toBe("true");
+    expect(new URL(sent(fetch, 1).url).searchParams.get("permanent")).toBe("true");
+    expect(sent(fetch, 2).url).toBe(
+      `${API}/search/geocode/v6/batch?permanent=true&access_token=tok`,
+    );
+    // Place search is for temporary use whatever the option says.
+    expect(sent(fetch, 3).url).not.toContain("permanent");
+    expect(geo.capabilities.geocode?.cache).toEqual({ maxTtl: Infinity });
+    expect(geo.capabilities.reverse?.cache).toEqual({ maxTtl: Infinity });
+    expect(geo.capabilities.cache).toEqual({ maxTtl: 0 });
+    for (const operation of ["autocomplete", "places", "lookup"] as const)
+      expect(geo.capabilities[operation]?.cache).toBeUndefined();
+  });
+});
 
 describe.skipIf(!token)("live", () => {
   const geo = new Geocoder({ adapter: mapbox({ accessToken: token ?? "" }) });

@@ -59,6 +59,14 @@ export interface MapboxOptions extends AdapterOptions {
    * Mapbox documents both 50 and 1000 as the limit, so raise it only if your account accepts more.
    */
   batchSize?: number | undefined;
+  /**
+   * Whether you intend to store the answers of geocode, reverse and batch calls.
+   * `true` sends Mapbox's `permanent=true`, which Mapbox bills and licenses differently, and lets a cache keep those answers.
+   * Without it Mapbox answers are for temporary use, and a cache keeps none of them.
+   * Suggestions, place search and lookup are for temporary use either way.
+   * See https://docs.mapbox.com/api/search/geocoding/#storing-geocoding-results.
+   */
+  permanent?: boolean | undefined;
 }
 
 /** Mapbox's own API. */
@@ -565,6 +573,9 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
     query.set("access_token", options.accessToken);
   });
   const batchSize = Math.max(1, Math.trunc(options.batchSize ?? 50));
+  const stored = options.permanent === true ? { permanent: true } : {};
+  // An answer asked for as permanent may be kept without limit, and any other not at all.
+  const kept = options.permanent === true ? { cache: { maxTtl: Infinity } } : {};
 
   /** Runs queries through `/batch` in chunks. A chunk that fails fails its own items only. */
   async function batch(
@@ -584,6 +595,7 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
           ...context.options,
           method: "POST",
           path: "/search/geocode/v6/batch",
+          query: stored,
           body: rows,
           // A batch only reads, so a retry repeats it safely.
           idempotent: true,
@@ -620,10 +632,12 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
       geocode: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "structured"],
         fields: geocoding(["match", "translations"]),
+        ...kept,
       },
       reverse: {
         options: ["limit", "language", "countries", "types"],
         fields: geocoding(["translations"]),
+        ...kept,
       },
       autocomplete: {
         options: ["limit", "language", "countries", "focus", "bounds", "types", "session"],
@@ -636,12 +650,13 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
       },
       lookup: { options: ["language", "session"], fields: SEARCH_BOX_FIELDS },
       batch: { geocode: true, reverse: true },
+      cache: { maxTtl: 0 },
     },
     async geocode(base, call) {
       const answer = await request<Collection>({
         ...call,
         path: "/search/geocode/v6/forward",
-        query: forward(base, base),
+        query: { ...forward(base, base), ...stored },
       }).withResponse();
       return collection(answer, base);
     },
@@ -649,7 +664,7 @@ export function mapbox(options: MapboxOptions): Adapter<MapboxNative> {
       const answer = await request<Collection>({
         ...call,
         path: "/search/geocode/v6/reverse",
-        query: backward(base, base.point),
+        query: { ...backward(base, base.point), ...stored },
       }).withResponse();
       return collection(answer, base);
     },
