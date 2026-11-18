@@ -86,7 +86,11 @@ const googleplex = {
 
 const KEY = "test-key";
 const PLACE_MASK =
-  "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.addressComponents";
+  "places.id,places.attributions,places.displayName,places.formattedAddress,places.location,places.types,places.addressComponents";
+
+// Google requires the text `Google Maps`, unchanged and untranslated, wherever its content is shown off a Google map.
+// Source: https://developers.google.com/maps/documentation/geocoding/policies, under attribution requirements.
+const GOOGLE_MAPS = [{ text: "Google Maps", url: null, licence: null }];
 const GEOCODE_MASK =
   "results.placeId,results.location,results.granularity,results.formattedAddress,results.addressComponents,results.types";
 const SUGGESTION_MASK =
@@ -166,7 +170,7 @@ describe("the google adapter", () => {
             plusCode: null,
           },
         ],
-        attribution: [],
+        attribution: GOOGLE_MAPS,
         unavailable: ["confidence"],
         ignored: ["countries", "focus"],
       });
@@ -322,7 +326,7 @@ describe("the google adapter", () => {
             highlights: [{ start: 0, end: 15 }],
           },
         ],
-        attribution: [],
+        attribution: GOOGLE_MAPS,
         unavailable: ["location", "accuracy", "confidence", "address"],
         ignored: [],
       });
@@ -423,7 +427,7 @@ describe("the google adapter", () => {
             address: emptyAddress(),
           },
         ],
-        attribution: [],
+        attribution: GOOGLE_MAPS,
         unavailable: ["accuracy", "confidence"],
         ignored: ["countries"],
       });
@@ -510,7 +514,7 @@ describe("the google adapter", () => {
       expect(headers(fetch)).toMatchObject({
         "X-Goog-Api-Key": KEY,
         "X-Goog-FieldMask":
-          "id,displayName,formattedAddress,location,types,addressComponents,viewport,postalAddress,primaryType,primaryTypeDisplayName,internationalPhoneNumber,websiteUri,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,rating,userRatingCount,businessStatus,timeZone,utcOffsetMinutes,entrances,navigationPoints,plusCode",
+          "id,attributions,displayName,formattedAddress,location,types,addressComponents,viewport,postalAddress,primaryType,primaryTypeDisplayName,internationalPhoneNumber,websiteUri,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,rating,userRatingCount,businessStatus,timeZone,utcOffsetMinutes,entrances,navigationPoints,plusCode",
       });
       expect(answer).toEqual({
         provider: "google",
@@ -553,7 +557,7 @@ describe("the google adapter", () => {
             brand: null,
           },
         ],
-        attribution: [],
+        attribution: GOOGLE_MAPS,
         unavailable: ["accuracy", "confidence", "distance", "brand"],
         ignored: [],
       });
@@ -789,6 +793,39 @@ describe("the google adapter", () => {
 
 const live = () =>
   new Geocoder({ adapter: google({ apiKey: process.env.GOOGLE_MAPS_API_KEY ?? "" }) });
+
+describe("the google adapter, inside Google's terms", () => {
+  it("credits each data provider Google names for a place, after Google itself", async () => {
+    // Google's `attributions` on a place lists the data providers to credit with it.
+    // The two below are made up, in the documented shape `{ provider, providerUri }`.
+    const credited = [
+      {
+        ...googleplex,
+        attributions: [{ provider: "Harrowmere Transit", providerUri: "https://transit.example/" }],
+      },
+      {
+        ...googleplex,
+        id: "second",
+        attributions: [{ provider: "Harrowmere Transit" }, { provider: "Quillfield Survey" }],
+      },
+    ];
+    const answer = await geocoder(fakeFetch({ body: { places: credited } })).places("Googleplex");
+    expect(answer.attribution).toEqual([
+      ...GOOGLE_MAPS,
+      { text: "Harrowmere Transit", url: null, licence: null },
+      { text: "Quillfield Survey", url: null, licence: null },
+    ]);
+  });
+
+  it("lets a cache keep an answer for 30 days and no longer", () => {
+    // Google lets latitude and longitude be kept for up to 30 consecutive calendar days.
+    // Source: https://developers.google.com/maps/documentation/geocoding/policies, under caching.
+    const { capabilities } = geocoder(fakeFetch({ body: {} }));
+    expect(capabilities.cache).toEqual({ maxTtl: 30 * 24 * 60 * 60 * 1000 });
+    for (const operation of ["geocode", "reverse", "autocomplete", "places", "lookup"] as const)
+      expect(capabilities[operation]?.cache).toBeUndefined();
+  });
+});
 
 describe.skipIf(!process.env.GOOGLE_MAPS_API_KEY)("the google adapter, live", () => {
   it("geocodes an address", async () => {

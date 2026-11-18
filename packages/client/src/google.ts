@@ -28,6 +28,7 @@ import type {
   AccessPoint,
   Accuracy,
   Address,
+  Attribution,
   BBox,
   BusinessStatus,
   FieldName,
@@ -88,6 +89,8 @@ interface Hours {
 interface Result {
   /** The place ID on a place. */
   id?: string;
+  /** The data providers Google asks to be credited for a place. */
+  attributions?: { provider?: string; providerUri?: string }[];
   /** The place ID on a Geocoding result. */
   placeId?: string;
   displayName?: LocalizedText;
@@ -236,6 +239,8 @@ const ERRORS: ReadonlyMap<string, GeocoderErrorCode> = new Map<string, GeocoderE
  */
 const PLACE_PATHS: readonly string[] = [
   "id",
+  // The credits Google asks to be shown with a place are part of every answer.
+  "attributions",
   "displayName",
   "formattedAddress",
   "location",
@@ -437,6 +442,32 @@ function nameOf(source: Result, type: PlaceType, address: Address): string {
   return text(own?.longText) ?? source.formattedAddress ?? "";
 }
 
+/**
+ * Google requires this text, unchanged and untranslated, wherever its content is shown off a Google map.
+ * See https://developers.google.com/maps/documentation/geocoding/policies.
+ */
+const GOOGLE_CREDIT: Attribution = { text: "Google Maps", url: null, licence: null };
+
+/**
+ * Google lets latitude and longitude be kept for 30 days, and place IDs without limit.
+ * See https://developers.google.com/maps/documentation/geocoding/policies.
+ */
+const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+
+/** The credit Google requires where its content is shown, and each data provider it names for a place. */
+function credits(shown: readonly Result[] = []): Attribution[] {
+  const named = new Map<string, Attribution>();
+  for (const place of shown)
+    for (const credit of place.attributions ?? [])
+      if (credit.provider)
+        named.set(credit.provider, {
+          text: credit.provider,
+          url: credit.providerUri ?? null,
+          licence: null,
+        });
+  return [GOOGLE_CREDIT, ...named.values()];
+}
+
 /** The fields a Geocoding result and a place share. */
 function toPlace(source: Result): PlaceRecord {
   const type = toType(source.types);
@@ -610,6 +641,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
     }).withResponse();
     return {
       results: ofTypes((answer.data.results ?? []).map(toPlace), request.types),
+      attribution: credits(),
       raw: answer.data,
       response: answer.response,
       requestId: answer.requestId,
@@ -634,6 +666,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
         fields: PLACE_FIELDS,
       },
       lookup: { options: ["language", "session"], fields: PLACE_FIELDS },
+      cache: { maxTtl: THIRTY_DAYS },
     },
     geocode(request, call) {
       return request.address === undefined
@@ -687,6 +720,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       );
       return {
         results: ofTypes(predictions.map(toSuggestion), request.types),
+        attribution: credits(),
         raw: answer.data,
         response: answer.response,
         requestId: answer.requestId,
@@ -722,6 +756,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       }).withResponse();
       return {
         results: ofTypes((answer.data.places ?? []).map(toDetailedPlace), request.types),
+        attribution: credits(answer.data.places),
         raw: answer.data,
         response: answer.response,
         requestId: answer.requestId,
@@ -764,6 +799,7 @@ export function google(options: GoogleOptions): Adapter<GoogleNative> {
       const found = answers.filter((answer) => answer !== undefined);
       return {
         results: found.map(toDetailedPlace),
+        attribution: credits(found),
         // One body per ID found, since each ID is its own request.
         raw: found,
         response,
