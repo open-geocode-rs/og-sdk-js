@@ -4,12 +4,13 @@
  * Request and response types come from og's OpenAPI contract
  * (`contract/openapi.json`), generated into `schema.gen.ts` by `bun run gen`.
  */
-import { APIUserAbortError } from "./errors.ts";
 import {
   APIPromise,
   type Logger,
   type LogLevel,
+  readBody,
   type RequestOptions,
+  sleep,
   Transport,
   withRequestId,
 } from "./core.ts";
@@ -183,17 +184,7 @@ export function createClient(options: ClientOptions): Client {
         for (;;) {
           const current = await status(id, call);
           if (current.status !== "running") return current;
-          await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(resolve, interval);
-            call?.signal?.addEventListener(
-              "abort",
-              () => {
-                clearTimeout(timer);
-                reject(new APIUserAbortError("Request was aborted."));
-              },
-              { once: true },
-            );
-          });
+          await sleep(interval, call?.signal);
         }
       },
       results: (id, call) =>
@@ -214,14 +205,14 @@ export function createClient(options: ClientOptions): Client {
           path: `${job(id)}/results`,
           headers: { accept: "*/*" },
           idempotent: true,
-          options: { timeout: 2 ** 31 - 1, ...call },
+          options: { timeout: Infinity, ...call },
         });
         if (!response.body) return;
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffered = "";
         try {
           for (;;) {
-            const { value, done } = await reader.read();
+            const { value, done } = await readBody(response, () => reader.read());
             if (done) break;
             buffered += value;
             let newline: number;

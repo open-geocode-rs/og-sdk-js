@@ -55,6 +55,7 @@ export {
 } from "./adapter.ts";
 export {
   APIPromise,
+  readBody,
   retryDelay,
   Transport,
   type Call,

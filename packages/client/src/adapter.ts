@@ -8,10 +8,11 @@ import {
   type Logger,
   type LogLevel,
   type RequestOptions,
+  sleep,
   Transport,
   type TransportOptions,
 } from "./core.ts";
-import { APIUserAbortError, type GeocoderErrorCode, type OgError } from "./errors.ts";
+import type { GeocoderErrorCode, OgError } from "./errors.ts";
 import type {
   Address,
   Attribution,
@@ -321,25 +322,6 @@ export function distance(a: LatLon, b: LatLon): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Resolves after `ms`, or rejects when `signal` fires. */
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new APIUserAbortError("Request was aborted."));
-      return;
-    }
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new APIUserAbortError("Request was aborted."));
-      },
-      { once: true },
-    );
-  });
-}
-
 /**
  * Runs `task` over `items` with at most `concurrency` in flight, and returns the answers in input order.
  * A task that throws does not stop the others. Its error is passed to `onError`, which answers for it.
@@ -397,3 +379,5 @@ export function batchItem(input: BatchGeocodeInput): BatchGeocodeItem {
     ? { address: item.address }
     : { address: item as StructuredAddress };
 }
+
+export { sleep };

@@ -228,7 +228,12 @@ function codeOf(error: unknown): GeocoderErrorCode {
   if (error instanceof APIUserAbortError) return "aborted";
   if (error instanceof APIConnectionTimeoutError) return "timeout";
   if (error instanceof APIConnectionError) return "connection";
-  if (!(error instanceof OgError)) return "unknown";
+  if (!(error instanceof OgError)) {
+    // A signal's own reason, where something outside the transport let it through.
+    const name =
+      error !== null && typeof error === "object" ? (error as { name?: unknown }).name : "";
+    return name === "TimeoutError" ? "timeout" : name === "AbortError" ? "aborted" : "unknown";
+  }
   if (error.status === undefined) return "unknown";
   return (
     STATUS_CODES[error.status] ??

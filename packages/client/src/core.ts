@@ -20,7 +20,7 @@ export interface Logger {
 export interface RequestOptions {
   /** Cancels the request, for example when the user types the next letter. */
   signal?: AbortSignal | undefined;
-  /** Milliseconds before the request fails with `APIConnectionTimeoutError`. */
+  /** Milliseconds before the request fails with `APIConnectionTimeoutError`. `Infinity` or `0` sets no limit. */
   timeout?: number | undefined;
   /** Times a failed request is retried. */
   maxRetries?: number | undefined;
@@ -82,18 +82,111 @@ function toSearch(query: Record<string, unknown> | URLSearchParams | undefined):
   return text === "" ? "" : `?${text}`;
 }
 
-const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new APIUserAbortError("Request was aborted."));
-      },
-      { once: true },
+/** The signals one request runs under, kept so a failure can be read by which of them fired. */
+interface Watch {
+  /** What `fetch` is given. Absent when there is neither a caller's signal nor a timeout. */
+  signal: AbortSignal | undefined;
+  caller: AbortSignal | undefined;
+  /** The transport's own timeout. */
+  timer: AbortSignal | undefined;
+  timeout: number;
+  provider: string;
+}
+
+/** A response's signals outlive `send`, since they also end the reading of its body. */
+const watches = new WeakMap<Response, Watch>();
+
+function watch(caller: AbortSignal | undefined, timeout: number, provider: string): Watch {
+  const timer = Number.isFinite(timeout) && timeout > 0 ? AbortSignal.timeout(timeout) : undefined;
+  const parts = [caller, timer].filter((part) => part !== undefined);
+  return {
+    signal: parts.length === 2 ? AbortSignal.any(parts) : parts[0],
+    caller,
+    timer,
+    timeout,
+    provider,
+  };
+}
+
+const nameOf = (reason: unknown): string | undefined =>
+  reason !== null && typeof reason === "object" ? (reason as { name?: string }).name : undefined;
+
+/**
+ * The transport error for a request its signals ended, or `undefined` when none of them fired.
+ * Which signal fired decides, never the name of what was thrown alone, since a runtime may
+ * throw an `AbortError` for a timeout.
+ */
+function ended(watched: Watch, thrown?: unknown): OgError | undefined {
+  const { signal, timer, caller, provider } = watched;
+  if (!signal?.aborted) return undefined;
+  // The DOMException is the cause. A runtime may throw something else, and then the signal holds it.
+  const cause = nameOf(thrown) === nameOf(signal.reason) ? thrown : signal.reason;
+  // With both fired, the signal given to fetch carries the reason of the one that fired first.
+  if (timer?.aborted && signal.reason === timer.reason)
+    return new APIConnectionTimeoutError(
+      `${provider} did not answer within ${watched.timeout} ms.`,
+      { cause, provider },
     );
+  // A caller may pass a timeout signal of its own, which is a timeout all the same.
+  return nameOf(caller?.reason) === "TimeoutError"
+    ? new APIConnectionTimeoutError(
+        `${provider} did not answer before the caller's signal timed out.`,
+        {
+          cause,
+          provider,
+        },
+      )
+    : new APIUserAbortError("Request was aborted.", { cause, provider });
+}
+
+/** The error for a caller's signal that has fired. */
+function callerEnded(caller: AbortSignal, provider: string): OgError {
+  return ended({
+    signal: caller,
+    caller,
+    timer: undefined,
+    timeout: Infinity,
+    provider,
+  }) as OgError;
+}
+
+/**
+ * Resolves after `ms`, or rejects as soon as `signal` fires.
+ * The wait is a real timer, since a timeout signal alone does not keep a process alive until it fires.
+ */
+export function sleep(ms: number, signal?: AbortSignal, provider = "og"): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(callerEnded(signal, provider));
+      return;
+    }
+    const stop = (): void => {
+      clearTimeout(timer);
+      reject(callerEnded(signal as AbortSignal, provider));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", stop, { once: true });
   });
+}
+
+/**
+ * Reads a response's body. A read its request's signals end fails as the request itself would,
+ * with a timeout or an abort, and not with whatever the runtime throws.
+ */
+export async function readBody<T>(
+  response: Response,
+  read: (response: Response) => Promise<T>,
+): Promise<T> {
+  try {
+    return await read(response);
+  } catch (thrown) {
+    const watched = watches.get(response);
+    throw (watched && ended(watched, thrown)) ?? thrown;
+  }
+}
 
 /** Delay before retry `attempt` (0-based): the server's `retry-after` if sane, else exponential backoff with jitter. */
 export function retryDelay(attempt: number, headers: Headers | undefined): number {
@@ -140,10 +233,11 @@ export class Transport {
     const provider = this.#name;
     const maxRetries = call.idempotent ? (options?.maxRetries ?? this.#options.maxRetries) : 0;
     const timeout = options?.timeout ?? this.#options.timeout;
+    const caller = options?.signal;
     for (let attempt = 0; ; attempt++) {
-      if (options?.signal?.aborted) throw new APIUserAbortError("Request was aborted.");
-      const timer = AbortSignal.timeout(timeout);
-      const signal = options?.signal ? AbortSignal.any([options.signal, timer]) : timer;
+      // A retry never starts after the caller has given up.
+      if (caller?.aborted) throw callerEnded(caller, provider);
+      const watched = watch(caller, timeout, provider);
       this.log("debug", `${call.method} ${url}`, attempt > 0 ? { attempt } : "");
       let response: Response;
       try {
@@ -156,25 +250,24 @@ export class Transport {
             ...options?.headers,
           },
           ...(call.body === undefined ? {} : { body: call.body }),
-          signal,
+          ...(watched.signal === undefined ? {} : { signal: watched.signal }),
         });
       } catch (cause) {
-        if (options?.signal?.aborted)
-          throw new APIUserAbortError("Request was aborted.", { cause, provider });
-        const error = timer.aborted
-          ? new APIConnectionTimeoutError(`${provider} did not answer within ${timeout} ms.`, {
-              cause,
-              provider,
-            })
-          : new APIConnectionError(`Could not reach ${provider}.`, { cause, provider });
+        const error =
+          ended(watched, cause) ??
+          new APIConnectionError(`Could not reach ${provider}.`, { cause, provider });
+        // Only the transport's own timeout is worth another try. The caller's signal ends the call.
+        const own = watched.timer?.aborted === true && !caller?.aborted;
+        if (caller?.aborted || (error instanceof APIConnectionTimeoutError && !own)) throw error;
         if (attempt < maxRetries) {
           const wait = retryDelay(attempt, undefined);
           this.log("info", `${error.message} Retrying in ${Math.round(wait)} ms.`);
-          await sleep(wait, options?.signal);
+          await sleep(wait, caller, provider);
           continue;
         }
         throw error;
       }
+      watches.set(response, watched);
       if (response.ok) return response;
       const retryable = RETRY_STATUSES.has(response.status) || response.status >= 500;
       if (retryable && attempt < maxRetries) {
@@ -184,11 +277,15 @@ export class Transport {
           `${provider} answered ${response.status}. Retrying in ${Math.round(wait)} ms.`,
         );
         await response.body?.cancel();
-        await sleep(wait, options?.signal);
+        await sleep(wait, caller, provider);
         continue;
       }
       let body: unknown;
-      const text = await response.text().catch(() => "");
+      const text = await readBody(response, (answer) => answer.text()).catch((failure: unknown) => {
+        // A body the signals cut short is a timeout or an abort, not an error answer with no body.
+        if (failure instanceof OgError) throw failure;
+        return "";
+      });
       try {
         body = JSON.parse(text);
       } catch {
@@ -245,7 +342,11 @@ export class APIPromise<T, R extends Response | undefined = Response> extends Pr
   /** The parsed data, the raw `Response` and the provider's request ID. */
   withResponse(): Promise<WithResponse<T, R>> {
     this.#parsed ??= this.#response.then(async (response) => ({
-      data: await this.#parse(response),
+      // A body the request's signals cut short fails as a timeout or an abort.
+      data:
+        response === undefined
+          ? await this.#parse(response)
+          : await readBody(response, this.#parse as (answer: Response) => Promise<T>),
       response,
       requestId: this.#requestId(response),
     }));

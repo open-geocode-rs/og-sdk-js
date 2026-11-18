@@ -25,7 +25,7 @@ import {
   text,
   toParams,
 } from "./adapter.ts";
-import { APIPromise, type RequestOptions } from "./core.ts";
+import { APIPromise, readBody, type RequestOptions } from "./core.ts";
 import { BadRequestError, GeocoderError, NotFoundError, OgError } from "./errors.ts";
 import { alpha2, alpha3 } from "./iso.ts";
 import type {
@@ -816,7 +816,7 @@ function cell(value: string): string {
 
 const job = (id: string): string => `/batch/jobs/${encodeURIComponent(id)}`;
 const json = async <T>(response: Promise<Response>): Promise<T> =>
-  (await (await response).json()) as T;
+  readBody(await response, async (answer) => (await answer.json()) as T);
 
 const ENDED: ReadonlySet<string> = new Set(["completed", "failure", "stopped", "deleted"]);
 const QUERY_ITEMS: ReadonlySet<string> = new Set(["categoryQuery", "chainQuery"]);
@@ -879,7 +879,10 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
     call: RequestOptions | undefined,
   ): Promise<{ data: T; response: Response }> {
     const response = await send({ service, path: `/${service}`, query, options: call });
-    return { data: (await response.json()) as T, response };
+    return {
+      data: await readBody(response, async (answer) => (await answer.json()) as T),
+      response,
+    };
   }
 
   function result(
@@ -913,7 +916,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
       headers: { accept: "text/plain" },
       options: call,
     });
-    return response.status === 204 ? "" : await response.text();
+    return response.status === 204 ? "" : await readBody(response, (answer) => answer.text());
   };
 
   const native: HereNative = {
@@ -1041,7 +1044,7 @@ export function here(options: HereOptions = {}): Adapter<HereNative> {
         );
         if (done > reported) context.onProgress((reported = done), total);
         if (ENDED.has(state.status)) break;
-        await sleep(context.pollInterval, call?.signal);
+        await sleep(context.pollInterval, call?.signal, "here");
       }
       if (state.status === "stopped" || state.status === "deleted")
         throw new GeocoderError(`HERE batch job ${created.id} was ${state.status}.`, {
