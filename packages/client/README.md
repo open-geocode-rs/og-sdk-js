@@ -209,21 +209,25 @@ const { items } = await client.geocode({ q: "10 King St W, Toronto" });
 const near = await client.revgeocode({ at: "43.6489,-79.3789" });
 ```
 
-| Method                                                                                         | HERE endpoint               | On og         |
-| ---------------------------------------------------------------------------------------------- | --------------------------- | ------------- |
-| `geocode`                                                                                      | `GET /v1/geocode`           | yes           |
-| `revgeocode`                                                                                   | `GET /v1/revgeocode`        | yes           |
-| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode` | yes           |
-| `autosuggest`                                                                                  | `GET /v1/autosuggest`       | yes           |
-| `autocomplete`                                                                                 | `GET /v1/autocomplete`      | yes           |
-| `discover`                                                                                     | `GET /v1/discover`          | yes           |
-| `lookup`                                                                                       | `GET /v1/lookup`            | yes           |
-| `browse`                                                                                       | `GET /v1/browse`            | yes           |
-| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`            | yes           |
-| `batch.notifications.*`                                                                        | `/v7/batch/notifications`   | `unsupported` |
+| Method                                                                                         | HERE endpoint                              | On og |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------ | ----- |
+| `geocode`                                                                                      | `GET /v1/geocode`                          | yes   |
+| `revgeocode`                                                                                   | `GET /v1/revgeocode`                       | yes   |
+| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode`                | yes   |
+| `autosuggest`                                                                                  | `GET /v1/autosuggest`                      | yes   |
+| `autocomplete`                                                                                 | `GET /v1/autocomplete`                     | yes   |
+| `discover`                                                                                     | `GET /v1/discover`                         | yes   |
+| `lookup`                                                                                       | `GET /v1/lookup`                           | yes   |
+| `browse`                                                                                       | `GET /v1/browse`                           | yes   |
+| `signals`                                                                                      | `POST /v1/signals`                         | yes   |
+| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`                           | yes   |
+| `batch.notifications.*`                                                                        | `/v7/batch/notifications`                  | yes   |
+| `batch.version`, `health`, `openapi`                                                           | `/v7/version`, `/v7/health`, `/v7/openapi` | yes   |
 
 On og, `browse` filters by the HERE category ids og has a kind of place for, at any of their three levels.
 A chain or a food type asked for finds no place, since og holds neither.
+On og, `signals` are checked and written to og's log, since og keeps no store of them.
+A notification is kept by og and called with GET when a job that names it ends.
 
 ### Precisely
 
