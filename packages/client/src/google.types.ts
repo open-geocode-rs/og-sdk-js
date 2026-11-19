@@ -1378,6 +1378,185 @@ export interface GeocodePlaceParams {
   regionCode?: string | undefined;
 }
 
+// Place Photos.
+
+/**
+ * The request of `places.getPhotoMedia`.
+ * Give `maxWidthPx`, `maxHeightPx` or both, each within [1, 4800]. A larger photo is scaled down to fit, keeping its shape.
+ */
+export type GetPhotoMediaParams = {
+  /** The photo's media resource name, `places/{placeId}/photos/{photoReference}/media`. It is the path of the request. */
+  name: string;
+} & (
+  | { maxWidthPx: number; maxHeightPx?: number | undefined }
+  | { maxWidthPx?: number | undefined; maxHeightPx: number }
+);
+
+/** The response of `places.getPhotoMedia`. */
+export interface PhotoMedia {
+  /** The photo's media resource name. */
+  name?: string;
+  /** A short-lived URI of the image. */
+  photoUri?: string;
+}
+
+// Search Destinations.
+
+/** What kind of structure a place is. */
+export type StructureType =
+  | "STRUCTURE_TYPE_UNSPECIFIED"
+  | "POINT"
+  | "SECTION"
+  | "BUILDING"
+  | "GROUNDS";
+
+/** How addressable a place found by a point must be. */
+export type Addressability = "ADDRESSABILITY_UNSPECIFIED" | "ANY" | "PRIMARY" | "WEAK";
+
+/** Which places a point may find. */
+export interface PlaceFilter {
+  /** The kind of structure to find. */
+  structureType?: StructureType | undefined;
+  /** How addressable the place must be. */
+  addressability?: Addressability | undefined;
+}
+
+/** An address to find destinations at, as one text or in parts. */
+export type DestinationAddressQuery =
+  | { addressQuery: string; address?: never }
+  | { address: PostalAddress; addressQuery?: never };
+
+/** A point to find destinations at. */
+export interface DestinationLocationQuery {
+  /** The point. */
+  location: LatLng;
+  /** Which places the point may find. */
+  placeFilter?: PlaceFilter | undefined;
+}
+
+/** What to find destinations at. Exactly one is given. */
+export type DestinationQuery =
+  | { place: string; addressQuery?: never; locationQuery?: never }
+  | { addressQuery: DestinationAddressQuery; place?: never; locationQuery?: never }
+  | { locationQuery: DestinationLocationQuery; place?: never; addressQuery?: never };
+
+/** The request of `geocode.destinations`. */
+export type SearchDestinationsParams = DestinationQuery & {
+  /** The response fields wanted, sent as `X-Goog-FieldMask`. Every field is returned without one. */
+  fieldMask?: readonly SearchDestinationsField[] | undefined;
+  /** Keeps only navigation points reachable by these modes. All are kept without it. */
+  travelModes?: readonly NavigationTravelMode[] | undefined;
+  /** The language of the results. Default is the language of the place itself. */
+  languageCode?: string | undefined;
+  /** A two-letter region code. It formats the addresses. */
+  regionCode?: string | undefined;
+};
+
+/** An outline, as a GeoJSON Polygon or MultiPolygon. */
+export type DisplayPolygon =
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiPolygon"; coordinates: number[][][][] };
+
+/** A place as a destination tells of it. */
+export interface PlaceView {
+  /** The resource name, `places/{placeId}`. */
+  place?: string;
+  /** The place ID. */
+  placeId?: string;
+  /** The place's name. */
+  displayName?: LocalizedText;
+  /** What the place is, as one type tag. */
+  primaryType?: string;
+  /** What the place is, as type tags. */
+  types?: string[];
+  /** The address on one line. */
+  formattedAddress?: string;
+  /** The address in postal form. */
+  postalAddress?: PostalAddress;
+  /** What kind of structure the place is. */
+  structureType?: StructureType;
+  /** Where the place is. */
+  location?: ResponseLatLng;
+  /** The place's outline. */
+  displayPolygon?: DisplayPolygon;
+  /** The parts of the address. */
+  addressComponents?: AddressComponent[];
+}
+
+/** How a landmark helps find a destination. */
+export type DestinationLandmarkTag = "TAG_UNSPECIFIED" | "ADDRESS" | "ARRIVAL";
+
+/** A landmark near a destination. */
+export interface DestinationLandmark {
+  /** The landmark. */
+  place?: PlaceView;
+  /** How the destination lies to the landmark, in words. */
+  relationalDescription?: LocalizedText;
+  /** How the landmark helps. */
+  tags?: DestinationLandmarkTag[];
+  /** Meters between the two in a straight line. */
+  straightLineDistanceMeters?: number;
+  /** Meters between the two along the road or path network. */
+  travelDistanceMeters?: number;
+}
+
+/** A way into a destination. */
+export interface DestinationEntrance {
+  /** The entrance's name. */
+  displayName?: LocalizedText;
+  /** Where the entrance is. */
+  location?: ResponseLatLng;
+  /** Marks on the entrance. Left out when there are none. */
+  tags?: EntranceTag[];
+  /** The resource name of the place the entrance leads into. */
+  place?: string;
+}
+
+/** What a destination's navigation point is for. It has `UNKNOWN`, which a place's has not. */
+export type DestinationNavigationUsage = NavigationUsage | "UNKNOWN";
+
+/** A point on the road network from which a destination is reached. */
+export interface DestinationNavigationPoint {
+  /** A token that names the point to other Google services. */
+  navigationPointToken?: string;
+  /** The point's name. */
+  displayName?: LocalizedText;
+  /** Where the point is. */
+  location?: ResponseLatLng;
+  /** How the point can be reached. */
+  travelModes?: NavigationTravelMode[];
+  /** What the point is for. */
+  usages?: DestinationNavigationUsage[];
+}
+
+/** A place one travels to, with what helps arrive at it. */
+export interface Destination {
+  /** The place the query names. */
+  primary?: PlaceView;
+  /** The places that hold it, such as its building or grounds. */
+  containingPlaces?: PlaceView[];
+  /** The places it holds, such as units or shops. */
+  subDestinations?: PlaceView[];
+  /** Landmarks near it. */
+  landmarks?: DestinationLandmark[];
+  /** Its entrances. */
+  entrances?: DestinationEntrance[];
+  /** Points on the road network to stop at. */
+  navigationPoints?: DestinationNavigationPoint[];
+}
+
+/** The response of `geocode.destinations`. */
+export interface SearchDestinationsResponse {
+  /** The destinations. Usually one, and several for a query that can be read more than one way. Left out when there are none. */
+  destinations?: Destination[];
+}
+
+/** A field path of a destination. */
+export type DestinationField = Under<keyof Destination & string>;
+
+/** A field mask path of `geocode.destinations`. */
+export type SearchDestinationsField = "*" | "destinations" | `destinations.${DestinationField}`;
+
 // Errors.
 
 /** One detail of an error, such as a `google.rpc.ErrorInfo`. */

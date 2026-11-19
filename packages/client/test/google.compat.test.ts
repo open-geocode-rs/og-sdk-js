@@ -248,6 +248,73 @@ describe.runIf(OG_URL)("google client against og", () => {
     expect(none).toEqual({});
   });
 
+  it("geocode.destinations finds the address by text, in parts, at a point and by its place", async () => {
+    const byText = await client.geocode.destinations({ addressQuery: { addressQuery: ADDRESS } });
+    const primary = byText.destinations?.[0]?.primary;
+    expect(primary?.displayName?.text).toBe(ADDRESS);
+    expect(primary?.location).toEqual(POINT);
+    expect(primary?.place).toBe(`places/${primary?.placeId}`);
+    expect(primary?.primaryType).toBe("street_address");
+    expect(primary?.postalAddress?.addressLines).toEqual([ADDRESS]);
+
+    const byParts = await client.geocode.destinations({
+      addressQuery: { address: { addressLines: [ADDRESS], locality: "Monaco", regionCode: "MC" } },
+      fieldMask: ["destinations.primary.placeId"],
+    });
+    expect(byParts).toEqual({ destinations: [{ primary: { placeId: primary?.placeId } }] });
+
+    const atPoint = await client.geocode.destinations({
+      locationQuery: { location: POINT },
+      fieldMask: ["destinations.primary.placeId"],
+    });
+    expect(atPoint).toEqual(byParts);
+
+    // A town is no destination.
+    await expect(
+      client.geocode.destinations({ addressQuery: { addressQuery: "Monaco" } }),
+    ).resolves.toEqual({});
+  });
+
+  it("geocode.destinations states the entrances of a place, the main one preferred", async () => {
+    const { places = [] } = await client.places.searchText({
+      textQuery: "Musée Océanographique",
+      fieldMask: ["places.name", "places.displayName"],
+    });
+    const museum = places.find((place) => place.displayName?.text === "Musée Océanographique");
+    expect(museum?.name).toEqual(expect.any(String));
+    const { destinations = [] } = await client.geocode.destinations({
+      place: museum!.name!,
+      fieldMask: ["destinations.primary.place", "destinations.entrances"],
+    });
+    expect(destinations).toHaveLength(1);
+    const entrances = destinations[0]?.entrances ?? [];
+    expect(entrances.length).toBeGreaterThan(0);
+    for (const entrance of entrances) {
+      expect(entrance.place).toBe(museum?.name);
+      expect(Math.abs(entrance.location!.latitude! - 43.7308)).toBeLessThan(0.01);
+    }
+    expect(entrances.filter((entrance) => entrance.tags?.includes("PREFERRED"))).toHaveLength(1);
+  });
+
+  it("places.getPhotoMedia finds no photo, since og holds none", async () => {
+    const { places = [] } = await client.places.searchText({
+      textQuery: "casino",
+      fieldMask: ["places.name"],
+    });
+    const name = places[0]?.name;
+    expect(name).toEqual(expect.any(String));
+    await expect(
+      client.places.getPhotoMedia({ name: `${name}/photos/any/media`, maxWidthPx: 400 }),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      status: 400,
+      body: { error: { status: "INVALID_ARGUMENT" } },
+    });
+    await expect(
+      client.places.getPhotoMedia({ name: "places/nope/photos/any/media", maxHeightPx: 400 }),
+    ).rejects.toMatchObject({ code: "not_found", status: 404 });
+  });
+
   it("maps og's error answers, which keep Google's envelope", async () => {
     await expect(
       client.places.get({ name: "places/nope", fieldMask: ["id"] }),

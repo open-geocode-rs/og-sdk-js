@@ -155,19 +155,23 @@ const { places } = await client.places.searchText({
 const { results } = await client.geocode.address({ addressQuery: "10 King St W, Toronto" });
 ```
 
-| Method                | Google endpoint                    | On og |
-| --------------------- | ---------------------------------- | ----- |
-| `places.searchText`   | `POST /v1/places:searchText`       | yes   |
-| `places.autocomplete` | `POST /v1/places:autocomplete`     | yes   |
-| `places.get`          | `GET /v1/places/{placeId}`         | yes   |
-| `places.searchNearby` | `POST /v1/places:searchNearby`     | yes   |
-| `geocode.address`     | `GET /v4/geocode/address`          | yes   |
-| `geocode.location`    | `GET /v4/geocode/location`         | yes   |
-| `geocode.place`       | `GET /v4/geocode/places/{placeId}` | yes   |
+| Method                 | Google endpoint                                          | On og |
+| ---------------------- | -------------------------------------------------------- | ----- |
+| `places.searchText`    | `POST /v1/places:searchText`                             | yes   |
+| `places.autocomplete`  | `POST /v1/places:autocomplete`                           | yes   |
+| `places.get`           | `GET /v1/places/{placeId}`                               | yes   |
+| `places.searchNearby`  | `POST /v1/places:searchNearby`                           | yes   |
+| `places.getPhotoMedia` | `GET /v1/places/{placeId}/photos/{photoReference}/media` | yes   |
+| `geocode.address`      | `GET /v4/geocode/address`                                | yes   |
+| `geocode.location`     | `GET /v4/geocode/location`                               | yes   |
+| `geocode.place`        | `GET /v4/geocode/places/{placeId}`                       | yes   |
+| `geocode.destinations` | `POST /v4/geocode/destinations`                          | yes   |
 
 The field mask is the typed `fieldMask` parameter, sent as `X-Goog-FieldMask`.
 On og, `places.searchNearby` answers nearest first under either `rankPreference`.
 A type og has no category for finds no place.
+og holds no photos, so on og `places.getPhotoMedia` answers Google's own error for a photo the place does not have.
+On og, `geocode.destinations` states a destination's place and the entrances OpenStreetMap maps for it, the main one `PREFERRED`.
 
 ### Mapbox
 
