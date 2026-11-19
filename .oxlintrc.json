@@ -4,7 +4,7 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "ignorePatterns": ["dist", "**/schema.gen.ts"],
+  "ignorePatterns": ["dist", "**/schema.gen.ts", "og", ".og"],
   "rules": {
     "no-underscore-dangle": [
       "warn",

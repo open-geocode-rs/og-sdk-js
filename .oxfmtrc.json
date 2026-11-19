@@ -1,3 +1,10 @@
 {
-  "ignorePatterns": ["dist", "**/schema.gen.ts", "CHANGELOG.md", "packages/client/test/fixtures"]
+  "ignorePatterns": [
+    "dist",
+    "**/schema.gen.ts",
+    "CHANGELOG.md",
+    "og",
+    ".og",
+    "packages/client/test/fixtures"
+  ]
 }
