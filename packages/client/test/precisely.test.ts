@@ -19,6 +19,7 @@ import submitFixture from "./fixtures/precisely/bulk-submit-202.json" with { typ
 import cancelFixture from "./fixtures/precisely/cancel-200.json" with { type: "json" };
 import cancelErrorFixture from "./fixtures/precisely/cancel-400.json" with { type: "json" };
 import deleteFileFixture from "./fixtures/precisely/delete-file-200.json" with { type: "json" };
+import explainFixture from "./fixtures/precisely/explain-200.json" with { type: "json" };
 import badRequestFixture from "./fixtures/precisely/error-400.json" with { type: "json" };
 import unauthorizedFixture from "./fixtures/precisely/error-401.json" with { type: "json" };
 import forbiddenFixture from "./fixtures/precisely/error-403.json" with { type: "json" };
@@ -32,6 +33,8 @@ import partialFixture from "./fixtures/precisely/geocode-206.json" with { type: 
 import jobStatusFixture from "./fixtures/precisely/job-status-200.json" with { type: "json" };
 import jobsFixture from "./fixtures/precisely/jobs-200.json" with { type: "json" };
 import lookupFixture from "./fixtures/precisely/lookup-200.json" with { type: "json" };
+import postalCityFixture from "./fixtures/precisely/postal-city-200.json" with { type: "json" };
+import proximityFixture from "./fixtures/precisely/proximity-200.json" with { type: "json" };
 import reverseFixture from "./fixtures/precisely/reverse-200.json" with { type: "json" };
 import tokenFixture from "./fixtures/precisely/token-200.json" with { type: "json" };
 import tokenErrorFixture from "./fixtures/precisely/token-400.json" with { type: "json" };
@@ -195,6 +198,61 @@ const CASES: Case[] = [
       address: { addressLines: ["612 Lark"], country: "USA" },
     },
     reply: { body: autocompleteFixture },
+  },
+  {
+    name: "autocompletePostalCity",
+    call: (client) =>
+      client.autocompletePostalCity({
+        "X-Request-Id": "trace-4",
+        preferences: { maxResults: 5 },
+        address: { type: "POSTAL", postAddress: "5448", country: "USA" },
+      }),
+    method: "POST",
+    path: "/v1/autocomplete/postal-city",
+    body: {
+      preferences: { maxResults: 5 },
+      address: { type: "POSTAL", postAddress: "5448", country: "USA" },
+    },
+    headers: { "x-request-id": "trace-4" },
+    reply: { body: postalCityFixture },
+  },
+  {
+    name: "proximitySearch",
+    call: (client) =>
+      client.proximitySearch({
+        preferences: {
+          dataset: "premium-address-points",
+          distance: { value: 1, distanceUnit: "KILOMETER" },
+        },
+        location: { addressId: "1", latitude: 44.5231, longitude: -89.5741, country: "USA" },
+      }),
+    method: "POST",
+    path: "/v1/proximity-search",
+    body: {
+      preferences: {
+        dataset: "premium-address-points",
+        distance: { value: 1, distanceUnit: "KILOMETER" },
+      },
+      location: { addressId: "1", latitude: 44.5231, longitude: -89.5741, country: "USA" },
+    },
+    reply: { body: proximityFixture },
+  },
+  {
+    name: "explainAddressCode",
+    call: (client) =>
+      client.explainAddressCode({
+        codeType: "GlobalMatchCode",
+        codes: [{ id: "1", code: "V3-P1S4T3C4-3" }],
+        responseOptions: { includeOfficialDescription: true },
+      }),
+    method: "POST",
+    path: "/v1/explain-addresscode",
+    body: {
+      codeType: "GlobalMatchCode",
+      codes: [{ id: "1", code: "V3-P1S4T3C4-3" }],
+      responseOptions: { includeOfficialDescription: true },
+    },
+    reply: { body: explainFixture },
   },
   {
     name: "bulk.uploadUrl",
@@ -707,6 +765,15 @@ describe("precisely", () => {
       },
     );
 
+    it("sends autocompletePostalCity once, since a retried keystroke is already stale", async () => {
+      const fetch = fakeFetch(busy, { body: postalCityFixture });
+      const error = await caught(
+        onOg(fetch).autocompletePostalCity({ address: { postAddress: "5448", country: "USA" } }),
+      );
+      expect(error).toMatchObject({ code: "unavailable", operation: "autocompletePostalCity" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
     it("repeats a type-ahead call when the caller asks for it", async () => {
       const fetch = fakeFetch(busy, { body: autocompleteFixture });
       expect(await onOg(fetch).autocomplete({ address }, { maxRetries: 1 })).toEqual(
@@ -954,6 +1021,30 @@ describe("precisely", () => {
       });
     });
 
+    it("are told the points of a postal-city and a proximity answer, and none of an explanation", async () => {
+      const { plugin, seen } = recorder();
+      const fetch = fakeFetch(
+        { body: postalCityFixture },
+        { body: proximityFixture },
+        { body: explainFixture },
+      );
+      const client = onOg(fetch, { plugins: [plugin] });
+      await client.autocompletePostalCity({ address: { postAddress: "5448", country: "USA" } });
+      await client.proximitySearch({
+        preferences: { dataset: "premium-address-points" },
+        location: { latitude: 44.5231, longitude: -89.5741, country: "USA" },
+      });
+      await client.explainAddressCode({
+        codeType: "GlobalMatchCode",
+        codes: [{ code: "V4-P4-5" }],
+      });
+      expect(seen).toEqual({
+        autocompletePostalCity: [{ lat: 44.52307, lon: -89.57412 }],
+        proximitySearch: [{ lat: 44.52311, lon: -89.57409 }],
+        explainAddressCode: [],
+      });
+    });
+
     it("are told the first point of each item of a batch", async () => {
       const { plugin, seen } = recorder();
       const fetch = fakeFetch({ status: 206, body: partialFixture });
@@ -978,7 +1069,7 @@ describe("precisely", () => {
     );
 
     it("can send any lookup again on another client, by the name of its method", async () => {
-      const lookups = CASES.slice(0, 7);
+      const lookups = CASES.slice(0, 10);
       for (const expected of lookups) {
         const second = fakeFetch(expected.reply);
         const other = onOg(second);

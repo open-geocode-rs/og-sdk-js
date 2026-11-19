@@ -37,6 +37,8 @@ import type {
   CancelJobResponse,
   DeleteFileParams,
   DeleteFileResponse,
+  ExplainAddressCodeParams,
+  ExplainAddressCodeResponse,
   ExpressAutocompleteV2Params,
   GeocodeParams,
   GeocodeResponse,
@@ -47,6 +49,10 @@ import type {
   ListJobsResponse,
   LookupParams,
   LookupResponse,
+  PostalCityParams,
+  PostalCityResponse,
+  ProximitySearchParams,
+  ProximitySearchResponse,
   ResultsParams,
   ReverseGeocodeParams,
   ReverseGeocodeResponse,
@@ -115,6 +121,24 @@ export interface PreciselyClient extends ClientInfo {
     params: ExpressAutocompleteV2Params,
     options?: RequestOptions,
   ): APIPromise<AutocompleteResponse>;
+  /**
+   * `POST /v1/autocomplete/postal-city`. Predicts the postal code or town being typed.
+   * It is not retried unless `maxRetries` says so.
+   */
+  autocompletePostalCity(
+    params: PostalCityParams,
+    options?: RequestOptions,
+  ): APIPromise<PostalCityResponse>;
+  /** `POST /v1/proximity-search`. Finds the addresses nearest a point. */
+  proximitySearch(
+    params: ProximitySearchParams,
+    options?: RequestOptions,
+  ): APIPromise<ProximitySearchResponse>;
+  /** `POST /v1/explain-addresscode`. Reads up to 25 codes of an earlier answer, such as a Global Match Code, as words. */
+  explainAddressCode(
+    params: ExplainAddressCodeParams,
+    options?: RequestOptions,
+  ): APIPromise<ExplainAddressCodeResponse>;
   /** Bulk Geo Addressing v2. Upload a file, start a job over it, poll the job and read its output. */
   bulk: {
     /** `POST /v2/files/upload-url`. Asks for a file ID and the URL to upload the input file to. */
@@ -279,7 +303,21 @@ const PREDICTION_METHODS: ReadonlySet<string> = new Set([
   "autocomplete",
   "expressAutocomplete",
   "expressAutocompleteV2",
+  "autocompletePostalCity",
 ]);
+
+/** The point of a proximity search result, which Precisely writes as a latitude and a longitude. */
+function proximityPoint(result: unknown): Position | undefined {
+  const location = record(record(result)?.["location"]);
+  const lat: unknown = location?.["latitude"];
+  const lon: unknown = location?.["longitude"];
+  return typeof lon === "number" &&
+    typeof lat === "number" &&
+    Number.isFinite(lon) &&
+    Number.isFinite(lat)
+    ? { lat, lon }
+    : undefined;
+}
 
 /**
  * The points of an answer. A request with one item gives every candidate of that item.
@@ -288,6 +326,12 @@ const PREDICTION_METHODS: ReadonlySet<string> = new Set([
 function positions(method: string, data: unknown): Position[] {
   if (PREDICTION_METHODS.has(method))
     return pointsOf(record(record(data)?.["response"])?.["predictions"]);
+  if (method === "proximitySearch") {
+    const results = record(record(data)?.["response"])?.["results"];
+    return (Array.isArray(results) ? results : [])
+      .map(proximityPoint)
+      .filter((point) => point !== undefined);
+  }
   if (!BATCH_METHODS.has(method)) return [];
   const responses = record(data)?.["responses"];
   if (!Array.isArray(responses)) return [];
@@ -492,6 +536,12 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
       lookup("expressAutocomplete", "/v1/express-autocomplete", params, request, true),
     expressAutocompleteV2: (params, request) =>
       lookup("expressAutocompleteV2", "/v2/express-autocomplete", params, request, true),
+    autocompletePostalCity: (params, request) =>
+      lookup("autocompletePostalCity", "/v1/autocomplete/postal-city", params, request, true),
+    proximitySearch: (params, request) =>
+      lookup("proximitySearch", "/v1/proximity-search", params, request),
+    explainAddressCode: (params, request) =>
+      lookup("explainAddressCode", "/v1/explain-addresscode", params, request),
     bulk: {
       uploadUrl: (params, request) =>
         job({
