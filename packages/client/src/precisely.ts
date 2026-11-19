@@ -72,29 +72,44 @@ const HOST = "https://api.cloud.precisely.com";
 /** The regions Precisely answers real-time Geo Addressing calls from, besides its default host. */
 export type PreciselyRegion = "eu1" | "au1" | "gb1";
 
-/** Options for {@link precisely}. Give `baseUrl`, or `apiKey` with `apiSecret`. */
-export interface PreciselyOptions extends CommonOptions {
+/** Options for {@link precisely} against an og server. */
+export interface PreciselyOgOptions extends CommonOptions {
   /** An og server. Requests go to `<baseUrl>/compat/precisely`, and no key, secret or token is sent. */
-  baseUrl?: string | undefined;
-  /** A Precisely API key, for asking Precisely itself. It needs `apiSecret`. */
-  apiKey?: string | undefined;
+  baseUrl: string;
+  apiKey?: undefined;
+  apiSecret?: undefined;
+  region?: undefined;
+}
+
+/** Options for {@link precisely} against Precisely itself. */
+export interface PreciselyVendorOptions extends CommonOptions {
+  baseUrl?: undefined;
+  /** A Precisely API key. */
+  apiKey: string;
   /** The secret of the API key. */
-  apiSecret?: string | undefined;
+  apiSecret: string;
   /**
-   * The regional host that answers the real-time calls when Precisely itself is asked.
+   * The regional host that answers the real-time calls.
    * Default `https://api.cloud.precisely.com`.
    * The token call and the bulk calls always go to the default host, the only one Precisely documents for them.
    */
   region?: PreciselyRegion | undefined;
 }
 
-/** The Precisely client. */
-export interface PreciselyClient extends ClientInfo {
+/** Options for {@link precisely}. Give `baseUrl`, or `apiKey` with `apiSecret`. */
+export type PreciselyOptions = PreciselyOgOptions | PreciselyVendorOptions;
+
+/** The Precisely client against Precisely itself, which also trades the key for a token. */
+export interface PreciselyVendorClient extends PreciselyClient {
   /**
    * `POST /auth/v2/token`. Trades the API key and secret for a bearer token.
    * The other methods do this by themselves, so call it only to hand a token to something else.
    */
   token(options?: RequestOptions): APIPromise<TokenResponse>;
+}
+
+/** The Precisely client. Against og it sends no token, so it has no token call. */
+export interface PreciselyClient extends ClientInfo {
   /** `POST /v1/geocode`. Finds the point of up to 25 addresses. */
   geocode(params: GeocodeParams, options?: RequestOptions): APIPromise<GeocodeResponse>;
   /** `POST /v1/reverse-geocode`. Finds the address at up to 25 points. */
@@ -384,9 +399,12 @@ const jobPath = (params: JobParams): string => `/v2/bulk/jobs/${encodeURICompone
 
 /**
  * Builds a client that speaks Precisely's API.
- * It asks the og server at `baseUrl`, or Precisely itself when only `apiKey` and `apiSecret` are given.
+ * It asks the og server at `baseUrl`, or Precisely itself when `apiKey` and `apiSecret` are given.
  */
-export function precisely(options: PreciselyOptions): PreciselyClient {
+export function precisely(options: PreciselyOgOptions): PreciselyClient;
+export function precisely(options: PreciselyVendorOptions): PreciselyVendorClient;
+export function precisely(options: PreciselyOptions): PreciselyClient | PreciselyVendorClient;
+export function precisely(options: PreciselyOptions): PreciselyClient | PreciselyVendorClient {
   const base = createBase({
     shape: "precisely",
     options,
@@ -520,11 +538,9 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
         },
       });
 
-  return {
+  const client: PreciselyClient = {
     shape: base.shape,
     server: base.server,
-    token: (request) =>
-      job({ method: "token", args: [], options: request, send: (o) => exchange(o) }),
     geocode: (params, request) => lookup("geocode", "/v1/geocode", params, request),
     reverseGeocode: (params, request) =>
       lookup("reverseGeocode", "/v1/reverse-geocode", params, request),
@@ -670,4 +686,8 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
         }),
     },
   };
+  if (!vendor) return client;
+  const token: PreciselyVendorClient["token"] = (request) =>
+    job({ method: "token", args: [], options: request, send: (o) => exchange(o) });
+  return { ...client, token };
 }

@@ -12,7 +12,9 @@ import {
   jobIdOf,
   precisely,
   type PreciselyClient,
-  type PreciselyOptions,
+  type PreciselyOgOptions,
+  type PreciselyVendorClient,
+  type PreciselyVendorOptions,
 } from "../src/precisely.ts";
 import autocompleteFixture from "./fixtures/precisely/autocomplete-200.json" with { type: "json" };
 import submitFixture from "./fixtures/precisely/bulk-submit-202.json" with { type: "json" };
@@ -54,19 +56,15 @@ const TOKEN: Reply = { body: tokenFixture };
 const DAY = 86_400_000;
 
 /** A client that asks Precisely itself. Its first request is the token call. */
-const onVendor = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
+const onVendor = (
+  fetch: Fetch,
+  options: Partial<PreciselyVendorOptions> = {},
+): PreciselyVendorClient =>
   precisely({ apiKey: KEY, apiSecret: SECRET, fetch, logLevel: "off", ...options });
 
-/** A client that asks og. The key and secret are given to show that they are never sent. */
-const onOg = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
-  precisely({
-    baseUrl: `${OG}/`,
-    apiKey: KEY,
-    apiSecret: SECRET,
-    fetch,
-    logLevel: "off",
-    ...options,
-  });
+/** A client that asks og, which takes no key, secret or token. */
+const onOg = (fetch: Fetch, options: Partial<PreciselyOgOptions> = {}): PreciselyClient =>
+  precisely({ baseUrl: `${OG}/`, fetch, logLevel: "off", ...options });
 
 const methodOf = (fetch: Fetch, call = 0): string | undefined => fetch.mock.calls[call]![1]?.method;
 const rawBodyOf = (fetch: Fetch, call = 0): unknown => fetch.mock.calls[call]![1]?.body;
@@ -383,6 +381,7 @@ describe("precisely", () => {
       for (const options of [{}, { apiKey: KEY }, { apiSecret: SECRET }]) {
         let thrown: unknown;
         try {
+          // @ts-expect-error The types refuse these, so this is a JavaScript caller's mistake.
           precisely(options);
         } catch (error) {
           thrown = error;
@@ -448,12 +447,11 @@ describe("precisely", () => {
       expect(outcome.cache).toEqual({ maxTtl: 0 });
     });
 
-    it("asks og for a token without the key and secret", async () => {
-      const fetch = fakeFetch(TOKEN);
-      expect(await onOg(fetch).token()).toEqual(tokenFixture);
-      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/auth/v2/token`]);
-      expect(headersOf(fetch)["authorization"]).toBeUndefined();
-      expect(rawBodyOf(fetch)).toBe("grant_type=client_credentials&scope=default");
+    it("is not a call of the og client, which sends no token", () => {
+      const client = onOg(fakeFetch());
+      // @ts-expect-error og takes no token, so its client has no token call.
+      expect(client.token).toBeUndefined();
+      expect("token" in client).toBe(false);
     });
   });
 
@@ -624,12 +622,6 @@ describe("precisely", () => {
         "https://api.eu1.cloud.precisely.com/v1/autocomplete",
         `${HOST}/v2/files`,
       ]);
-    });
-
-    it("means nothing to og", async () => {
-      const fetch = fakeFetch({ body: geocodeFixture });
-      await onOg(fetch, { region: "eu1" }).geocode({ addresses: [address] });
-      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/v1/geocode`]);
     });
   });
 
@@ -1085,12 +1077,11 @@ describe("precisely", () => {
       }
     });
 
-    it("never see the token, file and job calls", async () => {
+    it("never see the file and job calls", async () => {
       const handle = vi.fn<Plugin["handle"]>((_call, next) => next());
       const fetch = fakeFetch({ body: jobStatusFixture });
       const client = onOg(fetch, { plugins: [{ name: "spy", handle }] });
       const url = `${OG_ROOT}/v2/files/${FILE_ID}/content`;
-      await client.token();
       await client.bulk.uploadUrl({ fileName: "f" });
       await client.bulk.upload({ url, content: "a" });
       await client.bulk.files();
@@ -1101,7 +1092,7 @@ describe("precisely", () => {
       await client.bulk.status({ jobId: JOB_ID });
       await client.bulk.cancel({ jobId: JOB_ID });
       await client.bulk.results({ downloadUrl: `${OG_ROOT}/v2/bulk/jobs/${JOB_ID}/output` });
-      expect(fetch).toHaveBeenCalledTimes(11);
+      expect(fetch).toHaveBeenCalledTimes(10);
       expect(handle).not.toHaveBeenCalled();
       await client.geocode({ addresses: [address] });
       expect(handle).toHaveBeenCalledTimes(1);

@@ -175,7 +175,8 @@ const near = await client.revgeocode({ at: "43.6489,-79.3789" });`,
     speaks: "Precisely's API, Geo Addressing v1 and bulk v2",
     asks: "og at /compat/precisely, or Precisely",
     client: precisely({ baseUrl }),
-    credentials: "`apiKey` and `apiSecret`, traded at `/auth/v2/token` for a Bearer token.",
+    credentials:
+      "`apiKey` and `apiSecret`, traded at `/auth/v2/token` for a Bearer token. Against og no token is fetched, and the client has no `token` call.",
     cache: "30 days.",
     example: `import { precisely } from "@open-geocode/client/precisely";
 
@@ -184,7 +185,6 @@ const { responses } = await client.geocode({
   addresses: [{ addressLines: ["10 King St W, Toronto"], country: "CA" }],
 });`,
     rows: {
-      token: ["POST /auth/v2/token"],
       geocode: ["POST /v1/geocode"],
       reverseGeocode: ["POST /v1/reverse-geocode"],
       lookup: ["POST /v1/lookup"],

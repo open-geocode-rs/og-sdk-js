@@ -263,7 +263,8 @@ const { responses } = await client.geocode({
 | `bulk.verify`                                     | `POST /v2/bulk-verify`                    | yes   |
 
 When it asks Precisely, the client fetches the Bearer token itself, keeps it until shortly before it expires, and fetches a fresh one when a call answers 401.
-When it asks og, no token call is made.
+When it asks og, no token call is made, and the client it returns has no `token` method.
+With `apiKey` and `apiSecret` it also has `token()`, which hands the Bearer token to something else.
 
 ## What every client shares
 

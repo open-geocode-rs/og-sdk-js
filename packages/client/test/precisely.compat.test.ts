@@ -10,8 +10,6 @@ const OG_URL = process.env["OG_URL"];
 const ADDRESS = "2 Avenue de Monte-Carlo";
 const LON = 7.4270688;
 const LAT = 43.7377547;
-const KEY = "ak-never-sent";
-const SECRET = "shh-never-sent";
 
 const caught = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
   Promise.resolve(promise).then(
@@ -41,11 +39,8 @@ describe.runIf(OG_URL)("precisely against og", () => {
       return outcome;
     },
   };
-  // A key and a secret are given to show that og is asked without them and answers all the same.
   const client = precisely({
-    baseUrl: OG_URL,
-    apiKey: KEY,
-    apiSecret: SECRET,
+    baseUrl: OG_URL ?? "",
     fetch: recording,
     plugins: [recorder],
     logLevel: "off",
@@ -324,20 +319,6 @@ describe.runIf(OG_URL)("precisely against og", () => {
       expect(outcome.data.response.status).toBe("OK");
       expect(outcome.data.response.predictions?.[0]?.prediction).toContain(ADDRESS);
       expect(seen[method]?.[0]).toEqual({ lat: LAT, lon: LON });
-    });
-  });
-
-  describe("token", () => {
-    it("hands out a bearer token to a client that asks for one", async () => {
-      const outcome = await client.token().withResponse();
-      expect(outcome.response?.url).toBe(`${OG_URL}/compat/precisely/auth/v2/token`);
-      expect(outcome.data).toEqual({
-        access_token: expect.any(String),
-        token_type: "Bearer",
-        expires_in: 3600,
-        scope: "default",
-      });
-      expect(outcome.data.access_token).not.toBe("");
     });
   });
 
@@ -645,16 +626,13 @@ describe.runIf(OG_URL)("precisely against og", () => {
   });
 
   // This runs last, over everything the tests above sent.
-  it("never sent the key, the secret or a token, and never asked for one by itself", () => {
+  it("never asked for a token and never sent one", () => {
     expect(sent.length).toBeGreaterThan(20);
-    const tokenCalls = sent.filter((request) => request.url.endsWith("/auth/v2/token"));
-    // The one token call is the one a test made by name.
-    expect(tokenCalls).toHaveLength(1);
     for (const request of sent) {
       expect(request.url.startsWith(`${OG_URL}/compat/precisely/`)).toBe(true);
+      expect(request.url).not.toContain("/auth/");
       const all = JSON.stringify(request);
-      for (const credential of [KEY, SECRET, btoa(`${KEY}:${SECRET}`), "Bearer", "Basic"])
-        expect(all).not.toContain(credential);
+      for (const credential of ["Bearer", "Basic"]) expect(all).not.toContain(credential);
       expect(Object.keys(request.headers).map((name) => name.toLowerCase())).not.toContain(
         "authorization",
       );
