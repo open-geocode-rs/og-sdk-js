@@ -44,6 +44,7 @@ import type {
   PaginatedJobDetailResponse,
   QualifiedQuery,
   RevgeocodeParams,
+  SignalsParams,
   VersionResponse,
 } from "./here.types.ts";
 
@@ -160,6 +161,11 @@ export interface HereClient extends ClientInfo {
   lookup(params: LookupParams, options?: RequestOptions): APIPromise<LookupResponse>;
   /** Lists places around a point by category, chain, food type or name, nearest first. `/v1/browse`. */
   browse(params: BrowseParams, options?: RequestOptions): APIPromise<OpenSearchBrowseResponse>;
+  /**
+   * Tells the service what an end user did with results, such as tapping or calling one. `POST /v1/signals`.
+   * It is never retried, since a repeated signal counts twice.
+   */
+  signals(params: SignalsParams, options?: RequestOptions): APIPromise<void>;
   /** The Batch API v7 jobs. */
   batch: HereBatch;
 }
@@ -174,6 +180,7 @@ type Service =
   | "discover"
   | "browse"
   | "lookup"
+  | "signals"
   | "batch";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -324,6 +331,21 @@ function multiBody(body: readonly MultiRevgeocodeQuery[] | string): string {
           return value === undefined ? [] : [`${name}=${lineValue(value)}`];
         })
         .join("&"),
+    )
+    .join("\n");
+}
+
+/** The body of a signals call, one signal per line in URL query syntax. */
+function signalsBody(body: SignalsParams["body"]): string {
+  if (typeof body === "string") return body;
+  return body
+    .map((signal) =>
+      (["action", "correlationId", "resourceId", "rank", "timestamp"] as const)
+        .flatMap((name) => {
+          const value = signal[name];
+          return value === undefined ? [] : [`${name}=${lineValue(value)}`];
+        })
+        .reduce((line, field) => `${line}&${field}`, "version=1"),
     )
     .join("\n");
 }
@@ -491,6 +513,25 @@ export function here(config: HereOptions): HereClient {
     discover: (params, options) => search("discover", "discover", params, options),
     lookup: (params, options) => search("lookup", "lookup", params, options),
     browse: (params, options) => search("browse", "browse", params, options),
+    signals: (params, options) =>
+      base.call({
+        method: "signals",
+        args: [params],
+        options,
+        // A signal reports, it does not look anything up, so no plugin and no cache sees it.
+        plugins: false,
+        parse: nothing,
+        send: (o) =>
+          send({
+            method: "POST",
+            service: "signals",
+            path: "/signals",
+            body: signalsBody(params.body),
+            headers: FORM,
+            idempotent: false,
+            options: o,
+          }),
+      }),
     batch: {
       create(params, options) {
         const { body, contentEncoding, ...query } = params;

@@ -257,6 +257,41 @@ export interface MultiRevgeocodeParams extends ReverseGeocodeOptions {
   body: readonly MultiRevgeocodeQuery[] | string;
 }
 
+/** What an end user did with a result. */
+export type SignalAction =
+  | "here:gs:action:call"
+  | "here:gs:action:email"
+  | "here:gs:action:navigate-from"
+  | "here:gs:action:navigate-to"
+  | "here:gs:action:pin"
+  | "here:gs:action:tap"
+  | "here:gs:action:view"
+  | "here:gs:action:share"
+  | "here:gs:action:visit";
+
+/** One user interaction with a result, as `/v1/signals` takes it. */
+export interface Signal {
+  /** What the user did. */
+  action: Open<SignalAction>;
+  /** The `X-Correlation-ID` header of the response the result came in. */
+  correlationId: string;
+  /** The `id` of the result acted on. */
+  resourceId: string;
+  /** The place of the result in the response's `items`, from 0. Always 0 for a lookup. */
+  rank: number;
+  /** When the user acted, in Unix epoch milliseconds. Recommended. */
+  timestamp?: number | undefined;
+}
+
+/** Parameters of `POST /v1/signals`. */
+export interface SignalsParams {
+  /**
+   * The request body. Either the signals, which are written one per line with `version=1`,
+   * or the body text itself, one line such as `version=1&action=here:gs:action:view&...` per signal.
+   */
+  body: readonly Signal[] | string;
+}
+
 /** The parameters of autosuggest, discover and browse that filter and page places. */
 export interface PlaceSearchOptions {
   /** Constraints on fuel station results (BETA). */
