@@ -246,18 +246,21 @@ const { responses } = await client.geocode({
 });
 ```
 
-| Method                                            | Precisely endpoint                        | On og         |
-| ------------------------------------------------- | ----------------------------------------- | ------------- |
-| `geocode`                                         | `POST /v1/geocode`                        | yes           |
-| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes           |
-| `lookup`                                          | `POST /v1/lookup`                         | yes           |
-| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes           |
-| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes           |
-| `verify`                                          | `POST /v1/verify`                         | `unsupported` |
-| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes           |
-| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes           |
-| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes           |
-| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | `unsupported` |
+| Method                                            | Precisely endpoint                        | On og |
+| ------------------------------------------------- | ----------------------------------------- | ----- |
+| `geocode`                                         | `POST /v1/geocode`                        | yes   |
+| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes   |
+| `lookup`                                          | `POST /v1/lookup`                         | yes   |
+| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes   |
+| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes   |
+| `verify`                                          | `POST /v1/verify`                         | yes   |
+| `autocompletePostalCity`                          | `POST /v1/autocomplete/postal-city`       | yes   |
+| `proximitySearch`                                 | `POST /v1/proximity-search`               | yes   |
+| `explainAddressCode`                              | `POST /v1/explain-addresscode`            | yes   |
+| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes   |
+| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes   |
+| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes   |
+| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | yes   |
 
 When it asks Precisely, the client fetches the Bearer token itself, keeps it until shortly before it expires, and fetches a fresh one when a call answers 401.
 When it asks og, no token call is made.

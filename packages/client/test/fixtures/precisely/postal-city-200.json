@@ -1,0 +1,23 @@
+{
+  "response": {
+    "status": "OK",
+    "predictions": [
+      {
+        "address": {
+          "country": { "isoAlpha3Code": "USA" },
+          "admin1": { "longName": "WI", "shortName": "WI" },
+          "admin2": { "longName": "Lark County", "shortName": "Lark County" },
+          "city": { "longName": "Harrowmere", "shortName": "Harrowmere" },
+          "postalCode": "54481"
+        },
+        "location": {
+          "feature": {
+            "type": "Feature",
+            "properties": { "crsName": "epsg:4326" },
+            "geometry": { "type": "Point", "coordinates": [-89.57412, 44.52307] }
+          }
+        }
+      }
+    ]
+  }
+}

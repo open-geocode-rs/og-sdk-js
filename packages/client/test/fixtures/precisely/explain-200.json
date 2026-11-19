@@ -1,0 +1,28 @@
+{
+  "responses": [
+    {
+      "id": "1",
+      "status": "OK",
+      "result": {
+        "codeType": "GlobalMatchCode",
+        "customerInsightSummary": "Address street verified with medium confidence. City corrected from reference data.",
+        "officialDescription": {
+          "addressMatchStatus": {
+            "symbol": "V3",
+            "status": "Verified",
+            "verificationLevel": 3,
+            "verificationLevelLabel": "Street verified"
+          },
+          "componentMatchStatus": {
+            "C": { "label": "Country", "value": 4, "meaning": "Verified without changes" },
+            "P": { "label": "Premise/House Number", "value": 1, "meaning": "Parsed and standardized but not identified in reference data" },
+            "S": { "label": "Street", "value": 4, "meaning": "Verified without changes" },
+            "T": { "label": "City", "value": 3, "meaning": "Verified and corrected using reference data" }
+          },
+          "matchConfidence": { "value": 3, "label": "Medium Confidence" }
+        }
+      }
+    }
+  ],
+  "generatedAt": "2026-03-02T09:14:05.118Z"
+}

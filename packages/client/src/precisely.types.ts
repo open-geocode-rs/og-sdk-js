@@ -605,6 +605,180 @@ export interface AutocompleteResponse {
   };
 }
 
+// Postal city, proximity search and address codes
+
+/** What `POST /v1/autocomplete/postal-city` completes, a postal code or a town. */
+export type PostalCityType = "POSTAL" | "CITY";
+
+/** The text typed so far, and where. */
+export interface PostalCityAddress {
+  /** Whether `postAddress` is the start of a postal code or of a town's name. */
+  type?: PostalCityType | undefined;
+  /** The postal code or town typed so far, such as `12180`. */
+  postAddress?: string | undefined;
+  /** The country, as an ISO 3166-1 alpha-2 or alpha-3 code or a common name. */
+  country: string;
+}
+
+/** The request of `POST /v1/autocomplete/postal-city`. */
+export interface PostalCityParams extends RequestHeaders {
+  preferences?: Preferences | undefined;
+  address: PostalCityAddress;
+}
+
+/** One postal code or town, with the areas around it. */
+export interface PostalCityPrediction {
+  address?: {
+    country?: CountryField;
+    admin1?: AdminField;
+    admin2?: AdminField;
+    city?: AdminField;
+    postalCode?: string;
+  };
+  /** Where it is. */
+  location?: Location;
+}
+
+/** The answer of `POST /v1/autocomplete/postal-city`. */
+export interface PostalCityResponse {
+  response: {
+    /** How the request ended. */
+    status: Status;
+    /** Why the request failed. */
+    errorMessage?: string;
+    /** The predictions, best first. */
+    predictions?: PostalCityPrediction[];
+  };
+}
+
+/** What `POST /v1/proximity-search` searches, and how far. */
+export interface ProximityPreferences {
+  /** The dataset to search, such as `premium-address-points`. Required. */
+  dataset: string;
+  /** The most results to answer. Default 1. */
+  maxResults?: number | undefined;
+  /** Options that depend on the dataset, all strings, such as `{ CLOSEST: "true" }`. */
+  customPreferences?: Record<string, string> | undefined;
+  /** How far from the point to search. The result's `distance` comes back in its unit. */
+  distance?: Distance | undefined;
+  /** How far over a border the search reaches, in kilometres. */
+  borderBufferKm?: number | undefined;
+  /** Whether to search the other datasets too. */
+  crossDatasetSearch?: boolean | undefined;
+  /** Whether to route the request to the dataset of the country. */
+  autoRoute?: boolean | undefined;
+  /** The coordinate system of the point, such as `EPSG:4326`. */
+  clientCoordSystemName?: string | undefined;
+}
+
+/** The point to search around. */
+export interface ProximityLocation {
+  /** The caller's own ID for the point, echoed in the answer. */
+  addressId?: string | undefined;
+  longitude: number;
+  latitude: number;
+  /** The country, as an ISO 3166-1 alpha-2 or alpha-3 code or a common name. */
+  country: string;
+}
+
+/** The request of `POST /v1/proximity-search`. */
+export interface ProximitySearchParams extends RequestHeaders {
+  preferences: ProximityPreferences;
+  location: ProximityLocation;
+}
+
+/** One address near the point. */
+export interface ProximityResult {
+  /** How far it is from the point, in the unit of the request's `distance`. */
+  distance?: number;
+  location?: { latitude: number; longitude: number };
+  /** The address's attributes, all strings, such as `FORMATTEDADDRESS`, `POSTALCODE` or `PBKEY`. */
+  metadata?: Record<string, string>;
+}
+
+/** The answer of `POST /v1/proximity-search`. */
+export interface ProximitySearchResponse {
+  response: {
+    /** The point's `addressId`, echoed. */
+    addressId?: string;
+    /** How the request ended. */
+    status?: Status;
+    /** Why the request failed. */
+    errorMessage?: string;
+    /** The addresses, nearest first. */
+    results?: ProximityResult[];
+  };
+}
+
+/** The code systems `POST /v1/explain-addresscode` reads. */
+export type AddressCodeType =
+  | "GlobalMatchCode"
+  | "GlobalLocationCode"
+  | "GlobalDeliveryIndicator"
+  | "ForwardResultCode"
+  | "ReverseResultCode";
+
+/** The request of `POST /v1/explain-addresscode`. */
+export interface ExplainAddressCodeParams extends RequestHeaders {
+  /** The code system every code is in. */
+  codeType: AddressCodeType;
+  /** The codes to explain, 1 to 25 of them. */
+  codes: { id?: string | undefined; code: string }[];
+  responseOptions?: { includeOfficialDescription?: boolean | undefined } | undefined;
+}
+
+/** How one component of a Global Match Code matched. */
+export interface ComponentMatchStatus {
+  /** The component, such as `Street`. */
+  label?: string;
+  /** Its status, from 0 to 6. */
+  value?: number;
+  /** What the status means, such as `Verified without changes`. */
+  meaning?: string;
+}
+
+/** The parts of a code, in words. Written here for the Global Match Code. */
+export interface OfficialDescription {
+  addressMatchStatus?: {
+    /** The first segment, such as `V4`. */
+    symbol?: string;
+    /** `Verified`, `Multiple Matches` or `Unmatched`. */
+    status?: string;
+    /** From 1 to 4, how fine the verification went. */
+    verificationLevel?: number;
+    verificationLevelLabel?: string;
+  };
+  /** Each component in the code, by its letter. */
+  componentMatchStatus?: Record<string, ComponentMatchStatus>;
+  matchConfidence?: { value?: number; label?: string };
+}
+
+/** One code, explained or not. */
+export interface ExplainedCode {
+  /** The code's `id`, echoed. */
+  id?: string;
+  /** `OK` when the code was explained. */
+  status: "OK" | "ERROR" | "INVALID_REQUEST";
+  result?: {
+    codeType?: string;
+    /** The code in a sentence or two, such as `Address premise verified with high confidence.` */
+    customerInsightSummary?: string;
+    /** Only when `responseOptions.includeOfficialDescription` is set. */
+    officialDescription?: OfficialDescription;
+  };
+  /** Why the code was not explained, ending with Precisely's error code in parentheses. */
+  errorMessage?: string;
+}
+
+/** The answer of `POST /v1/explain-addresscode`. The HTTP status is 206 when a code was not explained. */
+export interface ExplainAddressCodeResponse {
+  responses: ExplainedCode[];
+  /** Where the code systems are documented. */
+  documentationLink?: string;
+  /** When the answer was made, in ISO 8601. */
+  generatedAt?: string;
+}
+
 // Authentication
 
 /** The answer of `POST /auth/v2/token`. */
