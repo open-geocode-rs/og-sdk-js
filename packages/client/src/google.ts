@@ -35,9 +35,13 @@ import type {
   GeocodeLocationResponse,
   GeocodePlaceParams,
   GeocodeResult,
+  GetPhotoMediaParams,
   GetPlaceParams,
+  PhotoMedia,
   Place,
   ResponseLatLng,
+  SearchDestinationsParams,
+  SearchDestinationsResponse,
   SearchNearbyParams,
   SearchNearbyResponse,
   SearchTextParams,
@@ -75,6 +79,11 @@ export interface GoogleClient extends ClientInfo {
       params: SearchNearbyParams,
       options?: RequestOptions,
     ): APIPromise<SearchNearbyResponse>;
+    /**
+     * Place Photos. `GET /v1/places/{placeId}/photos/{photoReference}/media`.
+     * It asks for the photo's URI with `skipHttpRedirect=true`, and the image itself is loaded from that URI.
+     */
+    getPhotoMedia(params: GetPhotoMediaParams, options?: RequestOptions): APIPromise<PhotoMedia>;
   };
   /** Geocoding API v4. */
   geocode: {
@@ -93,6 +102,14 @@ export interface GoogleClient extends ClientInfo {
      * The answer is one bare result, with no `results` list around it.
      */
     place(params: GeocodePlaceParams, options?: RequestOptions): APIPromise<GeocodeResult>;
+    /**
+     * Finds the destinations at a place ID, an address or a point. `POST /v4/geocode/destinations`.
+     * Several destinations come back when the query can be read more than one way.
+     */
+    destinations(
+      params: SearchDestinationsParams,
+      options?: RequestOptions,
+    ): APIPromise<SearchDestinationsResponse>;
   };
 }
 
@@ -170,6 +187,12 @@ function positions(method: string, data: unknown): Position[] {
     case "places.get":
     case "geocode.place":
       return point(data as Place);
+    case "geocode.destinations": {
+      const destinations = (data as SearchDestinationsResponse).destinations;
+      return Array.isArray(destinations)
+        ? destinations.flatMap((destination) => point(destination?.primary))
+        : [];
+    }
     default:
       return [];
   }
@@ -209,12 +232,27 @@ function segment(text: string): string | undefined {
   return encodeURIComponent(text).replace(/%2C/g, ",");
 }
 
+/** The forms of resource name a method takes. */
+const RESOURCES = {
+  place: { pattern: /^places\/[^/]+$/, form: "places/{placeId}" },
+  photoMedia: {
+    pattern: /^places\/[^/]+\/photos\/[^/]+\/media$/,
+    form: "places/{placeId}/photos/{photoReference}/media",
+  },
+} as const;
+
 /** A resource name such as `places/{placeId}` as a path, each of its parts encoded. */
-function resource(name: string, field: string, method: string): string {
+function resource(
+  name: string,
+  field: string,
+  method: string,
+  kind: keyof typeof RESOURCES = "place",
+): string {
+  const { pattern, form } = RESOURCES[kind];
   const parts = name.split("/").map(segment);
-  if (!name.startsWith("places/") || parts.includes(undefined))
+  if (!pattern.test(name) || parts.includes(undefined))
     throw new GeocoderError(
-      `\`${field}\` must be a resource name of the form \`places/{placeId}\`, and it is ${JSON.stringify(name)}.`,
+      `\`${field}\` must be a resource name of the form \`${form}\`, and it is ${JSON.stringify(name)}.`,
       { code: "invalid_request", operation: method, provider: "google" },
     );
   return parts.join("/");
@@ -242,10 +280,13 @@ export function google(options: GoogleOptions): GoogleClient {
   const places = base.server === "og" ? "" : PLACES_URL;
   const geocode = base.server === "og" ? "" : GEOCODE_URL;
 
-  /** A POST whose body is the request without its field mask. The searches change nothing, so a retry is safe. */
+  /**
+   * A POST whose body is the request without its field mask. The searches change nothing, so a retry is safe.
+   * `url` is the host and path, since the two APIs have two hosts.
+   */
   function post<T>(
     method: string,
-    path: string,
+    url: string,
     params: { fieldMask?: readonly string[] | undefined },
     call: RequestOptions | undefined,
     defaults?: RequestOptions,
@@ -258,7 +299,7 @@ export function google(options: GoogleOptions): GoogleClient {
       send: (o) =>
         base.http({
           method: "POST",
-          path: `${places}${path}`,
+          path: url,
           body: JSON.stringify(body),
           headers: { "content-type": "application/json", ...masked(fieldMask) },
           idempotent: true,
@@ -299,10 +340,12 @@ export function google(options: GoogleOptions): GoogleClient {
     server: base.server,
     places: {
       searchText: (params, call) =>
-        post("places.searchText", "/v1/places:searchText", params, call),
+        post("places.searchText", `${places}/v1/places:searchText`, params, call),
       autocomplete: (params, call) =>
         // A retried keystroke is already stale.
-        post("places.autocomplete", "/v1/places:autocomplete", params, call, { maxRetries: 0 }),
+        post("places.autocomplete", `${places}/v1/places:autocomplete`, params, call, {
+          maxRetries: 0,
+        }),
       get: (params, call) => {
         const { name, fieldMask, ...query } = params;
         return get(
@@ -314,7 +357,21 @@ export function google(options: GoogleOptions): GoogleClient {
         );
       },
       searchNearby: (params, call) =>
-        post("places.searchNearby", "/v1/places:searchNearby", params, call),
+        post("places.searchNearby", `${places}/v1/places:searchNearby`, params, call),
+      getPhotoMedia: (params, call) => {
+        const { name, ...query } = params;
+        return get(
+          "places.getPhotoMedia",
+          params,
+          () => ({
+            path: `${places}/v1/${resource(name, "name", "places.getPhotoMedia", "photoMedia")}`,
+            // Without it the answer is a redirect to the image, which is no JSON to read.
+            query: { ...query, skipHttpRedirect: true },
+          }),
+          undefined,
+          call,
+        );
+      },
     },
     geocode: {
       address: (params, call) => {
@@ -359,6 +416,8 @@ export function google(options: GoogleOptions): GoogleClient {
           call,
         );
       },
+      destinations: (params, call) =>
+        post("geocode.destinations", `${geocode}/v4/geocode/destinations`, params, call),
     },
   };
 }

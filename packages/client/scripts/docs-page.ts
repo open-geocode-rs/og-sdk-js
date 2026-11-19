@@ -88,9 +88,11 @@ const { places } = await client.places.searchText({
       "places.autocomplete": ["POST /v1/places:autocomplete"],
       "places.get": ["GET /v1/places/{placeId}"],
       "places.searchNearby": ["POST /v1/places:searchNearby"],
+      "places.getPhotoMedia": ["GET /v1/places/{placeId}/photos/{photoReference}/media"],
       "geocode.address": ["GET /v4/geocode/address"],
       "geocode.location": ["GET /v4/geocode/location"],
       "geocode.place": ["GET /v4/geocode/places/{placeId}"],
+      "geocode.destinations": ["POST /v4/geocode/destinations"],
     },
   },
   {
