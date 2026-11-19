@@ -155,17 +155,19 @@ const { places } = await client.places.searchText({
 const { results } = await client.geocode.address({ addressQuery: "10 King St W, Toronto" });
 ```
 
-| Method                | Google endpoint                    | On og         |
-| --------------------- | ---------------------------------- | ------------- |
-| `places.searchText`   | `POST /v1/places:searchText`       | yes           |
-| `places.autocomplete` | `POST /v1/places:autocomplete`     | yes           |
-| `places.get`          | `GET /v1/places/{placeId}`         | yes           |
-| `places.searchNearby` | `POST /v1/places:searchNearby`     | `unsupported` |
-| `geocode.address`     | `GET /v4/geocode/address`          | yes           |
-| `geocode.location`    | `GET /v4/geocode/location`         | yes           |
-| `geocode.place`       | `GET /v4/geocode/places/{placeId}` | yes           |
+| Method                | Google endpoint                    | On og |
+| --------------------- | ---------------------------------- | ----- |
+| `places.searchText`   | `POST /v1/places:searchText`       | yes   |
+| `places.autocomplete` | `POST /v1/places:autocomplete`     | yes   |
+| `places.get`          | `GET /v1/places/{placeId}`         | yes   |
+| `places.searchNearby` | `POST /v1/places:searchNearby`     | yes   |
+| `geocode.address`     | `GET /v4/geocode/address`          | yes   |
+| `geocode.location`    | `GET /v4/geocode/location`         | yes   |
+| `geocode.place`       | `GET /v4/geocode/places/{placeId}` | yes   |
 
 The field mask is the typed `fieldMask` parameter, sent as `X-Goog-FieldMask`.
+On og, `places.searchNearby` answers nearest first under either `rankPreference`.
+A type og has no category for finds no place.
 
 ### Mapbox
 
@@ -180,17 +182,20 @@ const { suggestions } = await client.searchbox.suggest({ q: "casino", session_to
 const place = await client.searchbox.retrieve({ id: suggestions[0].mapbox_id, session_token });
 ```
 
-| Method                     | Mapbox endpoint                          | On og         |
-| -------------------------- | ---------------------------------------- | ------------- |
-| `geocoding.forward`        | `GET /search/geocode/v6/forward`         | yes           |
-| `geocoding.reverse`        | `GET /search/geocode/v6/reverse`         | yes           |
-| `geocoding.batch`          | `POST /search/geocode/v6/batch`          | yes           |
-| `searchbox.suggest`        | `GET /search/searchbox/v1/suggest`       | yes           |
-| `searchbox.retrieve`       | `GET /search/searchbox/v1/retrieve/{id}` | yes           |
-| `searchbox.forward`        | `GET /search/searchbox/v1/forward`       | yes           |
-| `searchbox.reverse`        | `GET /search/searchbox/v1/reverse`       | yes           |
-| `searchbox.category`       | `GET /search/searchbox/v1/category/{id}` | `unsupported` |
-| `searchbox.listCategories` | `GET /search/searchbox/v1/list/category` | `unsupported` |
+| Method                     | Mapbox endpoint                          | On og |
+| -------------------------- | ---------------------------------------- | ----- |
+| `geocoding.forward`        | `GET /search/geocode/v6/forward`         | yes   |
+| `geocoding.reverse`        | `GET /search/geocode/v6/reverse`         | yes   |
+| `geocoding.batch`          | `POST /search/geocode/v6/batch`          | yes   |
+| `searchbox.suggest`        | `GET /search/searchbox/v1/suggest`       | yes   |
+| `searchbox.retrieve`       | `GET /search/searchbox/v1/retrieve/{id}` | yes   |
+| `searchbox.forward`        | `GET /search/searchbox/v1/forward`       | yes   |
+| `searchbox.reverse`        | `GET /search/searchbox/v1/reverse`       | yes   |
+| `searchbox.category`       | `GET /search/searchbox/v1/category/{id}` | yes   |
+| `searchbox.listCategories` | `GET /search/searchbox/v1/list/category` | yes   |
+
+On og, `searchbox.listCategories` gives og's own list of ids, named in English.
+`searchbox.category` takes those ids, and any id whose words name a kind of place, such as `swimming_pool`.
 
 ### HERE
 
@@ -213,9 +218,12 @@ const near = await client.revgeocode({ at: "43.6489,-79.3789" });
 | `autocomplete`                                                                                 | `GET /v1/autocomplete`      | yes           |
 | `discover`                                                                                     | `GET /v1/discover`          | yes           |
 | `lookup`                                                                                       | `GET /v1/lookup`            | yes           |
-| `browse`                                                                                       | `GET /v1/browse`            | `unsupported` |
+| `browse`                                                                                       | `GET /v1/browse`            | yes           |
 | `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`            | yes           |
 | `batch.notifications.*`                                                                        | `/v7/batch/notifications`   | `unsupported` |
+
+On og, `browse` filters by the HERE category ids og has a kind of place for, at any of their three levels.
+A chain or a food type asked for finds no place, since og holds neither.
 
 ### Precisely
 

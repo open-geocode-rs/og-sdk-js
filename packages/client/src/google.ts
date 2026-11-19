@@ -70,7 +70,7 @@ export interface GoogleClient extends ClientInfo {
     ): APIPromise<AutocompleteResponse>;
     /** Place Details. `GET /v1/places/{placeId}`. */
     get(params: GetPlaceParams, options?: RequestOptions): APIPromise<Place>;
-    /** Nearby Search. `POST /v1/places:searchNearby`. An og server does not have it and fails with code `unsupported`. */
+    /** Nearby Search. `POST /v1/places:searchNearby`. */
     searchNearby(
       params: SearchNearbyParams,
       options?: RequestOptions,

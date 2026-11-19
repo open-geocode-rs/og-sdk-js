@@ -267,23 +267,32 @@ describe.runIf(OG_URL)("mapbox against og", () => {
       expect(feature.properties.context.address?.id).toBe(feature.properties.mapbox_id);
     });
 
-    it("has no category search on og, which answers 501", async () => {
-      const category = (await client.searchbox
-        .category({ canonical_category_id: "coffee" })
-        .catch((error: unknown) => error)) as GeocoderError;
-      expect(category).toBeInstanceOf(GeocoderError);
-      expect(category).toMatchObject({
-        code: "unsupported",
-        status: 501,
-        provider: "og",
-        operation: "searchbox.category",
+    it("lists the categories and finds the places of one around a point", async () => {
+      const list = await client.searchbox.listCategories();
+      const ids = list.listItems.map((item) => item.canonical_id);
+      expect(ids).toContain("coffee");
+      for (const item of list.listItems) {
+        expect(item).toMatchObject({ name: expect.any(String), icon: expect.any(String) });
+      }
+
+      const data = await client.searchbox.category({
+        canonical_category_id: "coffee",
+        proximity: [POINT.longitude, POINT.latitude],
+        limit: 3,
       });
-      const list = await client.searchbox.listCategories().catch((error: unknown) => error);
-      expect(list).toMatchObject({
-        code: "unsupported",
-        status: 501,
-        operation: "searchbox.listCategories",
-      });
+      expect(data.type).toBe("FeatureCollection");
+      expect(data.features.length).toBeGreaterThanOrEqual(1);
+      expect(data.features.length).toBeLessThanOrEqual(3);
+      for (const feature of data.features) {
+        expect(feature.properties.feature_type).toBe("poi");
+        expect(feature.properties.poi_category_ids).toContain("coffee");
+        expect(ids).toEqual(expect.arrayContaining(feature.properties.poi_category_ids ?? []));
+      }
+
+      const unknown = await client.searchbox
+        .category({ canonical_category_id: "no_such_kind_of_place" })
+        .catch((error: unknown) => error);
+      expect(unknown).toMatchObject({ code: "not_found", status: 404, provider: "og" });
     });
   });
 

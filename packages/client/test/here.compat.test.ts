@@ -276,19 +276,34 @@ describe.runIf(OG_URL)("here against og", () => {
     });
   });
 
-  describe("what og does not serve", () => {
-    it("fails browse with code unsupported", async () => {
-      const error = await failure(client.browse({ at: AT, categories: ["100-1000-0000"] }));
-      expect(error).toMatchObject({
-        code: "unsupported",
-        status: 501,
-        provider: "og",
-        operation: "browse",
-        retryable: true,
-      });
-      expect(error.body).toMatchObject({ status: 501, title: "Not Implemented" });
+  describe("browse", () => {
+    it("lists the places of a category around a point, nearest first", async () => {
+      const { items } = await client.browse({ at: AT, categories: ["100-1000"], limit: 5 });
+      expect(items.length).toBeGreaterThanOrEqual(1);
+      expect(items.length).toBeLessThanOrEqual(5);
+      for (const item of items) {
+        expect(item.resultType).toBe("place");
+        expect(item.categories?.[0]).toMatchObject({ primary: true, name: expect.any(String) });
+        expect(item.categories?.[0]?.id.startsWith("100-1000-")).toBe(true);
+      }
+      const distances = items.map((item) => item.distance ?? 0);
+      expect(distances.every((distance, at) => at === 0 || distances[at - 1]! <= distance)).toBe(
+        true,
+      );
     });
 
+    it("leaves out a category after an exclamation mark, and refuses an id that is none", async () => {
+      const { items } = await client.browse({
+        at: AT,
+        categories: ["100-1000", "!100-1000-0009"],
+      });
+      for (const item of items) expect(item.categories?.[0]?.id).not.toBe("100-1000-0009");
+      const error = await failure(client.browse({ at: AT, categories: ["coffee"] }));
+      expect(error).toMatchObject({ code: "invalid_request", status: 400, operation: "browse" });
+    });
+  });
+
+  describe("what og does not serve", () => {
     it("fails the notification calls and the OpenAPI document with code unsupported", async () => {
       const calls = [
         client.batch.notifications.list({ maxRetries: 0 }),

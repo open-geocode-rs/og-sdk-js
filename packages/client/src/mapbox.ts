@@ -72,12 +72,12 @@ export interface MapboxSearchBox {
   forward(params: SearchBoxForwardParams, options?: RequestOptions): APIPromise<SearchBoxResponse>;
   /** Finds what is at a point. `GET /search/searchbox/v1/reverse`. */
   reverse(params: SearchBoxReverseParams, options?: RequestOptions): APIPromise<SearchBoxResponse>;
-  /** Finds the POIs of one category. `GET /search/searchbox/v1/category/{canonical_category_id}`. An og server has no such search. */
+  /** Finds the POIs of one category. `GET /search/searchbox/v1/category/{canonical_category_id}`. */
   category(
     params: SearchBoxCategoryParams,
     options?: RequestOptions,
   ): APIPromise<SearchBoxResponse>;
-  /** Lists the categories `category` takes. `GET /search/searchbox/v1/list/category`. An og server has no such list. */
+  /** Lists the categories `category` takes. `GET /search/searchbox/v1/list/category`. */
   listCategories(
     params?: SearchBoxListCategoriesParams,
     options?: RequestOptions,

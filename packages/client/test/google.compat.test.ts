@@ -1,6 +1,5 @@
 /// <reference types="node" />
 import { describe, expect, it } from "vitest";
-import { GeocoderError } from "../src/errors.ts";
 import { google } from "../src/google.ts";
 
 const OG_URL = process.env["OG_URL"];
@@ -223,22 +222,30 @@ describe.runIf(OG_URL)("google client against og", () => {
     });
   });
 
-  it("places.searchNearby fails with code unsupported, since og does not have it", async () => {
-    const failed = (await client.places
-      .searchNearby({
-        fieldMask: ["places.id"],
-        locationRestriction: { circle: { center: POINT, radius: 500 } },
-      })
-      .catch((error: unknown) => error)) as GeocoderError;
-    expect(failed).toBeInstanceOf(GeocoderError);
-    expect(failed).toMatchObject({
-      code: "unsupported",
-      status: 501,
-      provider: "og",
-      operation: "places.searchNearby",
-      body: { error: { code: 501, status: "UNIMPLEMENTED" } },
+  it("places.searchNearby finds the places of a type inside a circle", async () => {
+    const circle = { circle: { center: POINT, radius: 1000 } };
+    const { places = [] } = await client.places.searchNearby({
+      fieldMask: ["places.id", "places.primaryType", "places.types", "places.location"],
+      includedTypes: ["pharmacy"],
+      maxResultCount: 3,
+      locationRestriction: circle,
     });
-    expect(failed.requestId).toEqual(expect.any(String));
+    expect(places.length).toBeGreaterThanOrEqual(1);
+    expect(places.length).toBeLessThanOrEqual(3);
+    for (const place of places) {
+      expect(place.id).toEqual(expect.any(String));
+      expect(place.primaryType).toBe("pharmacy");
+      expect(place.types).toContain("establishment");
+      expect(Math.abs(place.location!.latitude! - POINT.latitude)).toBeLessThan(0.01);
+    }
+
+    const none = await client.places.searchNearby({
+      fieldMask: ["places.id"],
+      includedTypes: ["pharmacy"],
+      excludedTypes: ["establishment"],
+      locationRestriction: circle,
+    });
+    expect(none).toEqual({});
   });
 
   it("maps og's error answers, which keep Google's envelope", async () => {
