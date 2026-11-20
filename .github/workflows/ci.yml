@@ -40,6 +40,35 @@ jobs:
           name: dist
           path: packages/*/dist
 
+  og:
+    # The og-backed suites, against the pinned og on a Monaco Pack and on a
+    # calibrated Rhode Island Pack, both built from OSM extracts here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: og
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Build og
+        run: cargo build --release --locked --bin open-geocode
+        working-directory: og
+      - name: Build the test Packs and serve og on each
+        run: ecosystem-tests/og/serve.sh og/target/release/open-geocode "$RUNNER_TEMP/og" 18900 18901 >> "$GITHUB_ENV"
+      - name: Every suite, the og-backed ones included
+        run: bun run test
+        env:
+          OG_TEST_ADDRESS: 12 Boulevard des Moulins Monaco
+      - name: og logs
+        if: failure()
+        run: tail -n 50 "$RUNNER_TEMP"/og/*.log
+
   runtimes:
     needs: check
     runs-on: ubuntu-latest

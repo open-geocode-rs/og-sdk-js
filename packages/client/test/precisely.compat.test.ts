@@ -347,11 +347,14 @@ describe.runIf(OG_URL)("precisely against og", () => {
         ]),
       );
       expect(keyOf(result)).not.toBe("");
-      expect(result.customFields?.["SIMPLE_MATCH_CODE"]).toMatch(/^V4-P4S4A\dT\dR\dZ\dC\d-\d$/);
+      // The Monaco Pack is not calibrated, and a match code ends in the confidence
+      // only a calibrated score gives, so there is none. The company flows check one.
+      expect(result.score).toBeUndefined();
+      expect(result.customFields?.["SIMPLE_MATCH_CODE"]).toBeUndefined();
       expect(seen["verify"]).toEqual([]);
 
-      // The code reads back as words.
-      const code = result.customFields!["SIMPLE_MATCH_CODE"]!;
+      // A code reads back as words. The company flows read back one verify gave.
+      const code = "V4-P4S4A6T4R6Z6C4-4";
       const explained = await client.explainAddressCode({
         codeType: "GlobalMatchCode",
         codes: [{ id: "c1", code }],
@@ -594,7 +597,7 @@ describe.runIf(OG_URL)("precisely against og", () => {
       expect(header).toContain("customFields");
       expect(lines[1]).toMatch(/^row-1,OK,,/);
       expect(lines[1]).toContain(ADDRESS);
-      expect(lines[1]).toMatch(/""simpleMatchCode"":""V4-P4S4/);
+      expect(lines[1]).not.toContain("simpleMatchCode");
       await client.bulk.deleteFile({ fileId });
     });
 
