@@ -19,6 +19,49 @@ const TOWN = "Providence";
 const LABEL = "25 Dorrance Street, Providence, RI, 02903";
 const AT = { lat: 41.8240167, lng: -71.4125419 };
 
+/** Every town of Rhode Island, each asked for by its name and the state. */
+const TOWNS = [
+  "Barrington",
+  "Bristol",
+  "Burrillville",
+  "Central Falls",
+  "Charlestown",
+  "Coventry",
+  "Cranston",
+  "Cumberland",
+  "East Greenwich",
+  "East Providence",
+  "Exeter",
+  "Foster",
+  "Glocester",
+  "Hopkinton",
+  "Jamestown",
+  "Johnston",
+  "Lincoln",
+  "Little Compton",
+  "Middletown",
+  "Narragansett",
+  "New Shoreham",
+  "Newport",
+  "North Kingstown",
+  "North Providence",
+  "North Smithfield",
+  "Pawtucket",
+  "Portsmouth",
+  "Providence",
+  "Richmond",
+  "Scituate",
+  "Smithfield",
+  "South Kingstown",
+  "Tiverton",
+  "Warren",
+  "Warwick",
+  "West Greenwich",
+  "West Warwick",
+  "Westerly",
+  "Woonsocket",
+];
+
 const refused = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
   Promise.resolve(promise).then(
     () => {
@@ -29,6 +72,47 @@ const refused = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
 
 // The flows a company runs on its own data, one per vendor, end to end against og.
 describe.runIf(OG_RI_URL)("company flows against og on a Rhode Island Pack", () => {
+  it("every town asked with its state answers the town, on every vendor", async () => {
+    const url = OG_RI_URL ?? "";
+    const g = google({ baseUrl: url, apiKey: "unused", logLevel: "off" });
+    const m = mapbox({ baseUrl: url, accessToken: "pk.never-sent", logLevel: "off" });
+    const h = here({ baseUrl: url, apiKey: "unused", logLevel: "off" });
+    const p = precisely({ baseUrl: url, logLevel: "off" });
+    const wrong: string[] = [];
+    for (const town of TOWNS) {
+      const asked = `${town}, RI`;
+      const [google_, mapbox_, here_, precisely_] = await Promise.all([
+        g.geocode.address({ addressQuery: asked }),
+        m.geocoding.forward({ q: asked, limit: 1 }),
+        h.geocode({ q: asked, limit: 1 }),
+        p.geocode({ addresses: [{ addressLines: [town], admin1: "RI", country: "USA" }] }),
+      ]);
+      const first = google_.results?.[0];
+      if (!first?.types?.includes("locality") || !first.formattedAddress?.startsWith(town)) {
+        wrong.push(`google ${asked}`);
+      }
+      const feature = mapbox_.features[0]?.properties;
+      if (feature?.feature_type !== "place" || feature.name !== town) wrong.push(`mapbox ${asked}`);
+      const item = here_.items[0];
+      if (item?.resultType !== "locality" || item.address.city !== town)
+        wrong.push(`here ${asked}`);
+      // Every town of the Pack has a boundary, so a map can fit it.
+      if (!item?.mapView) wrong.push(`here mapView ${asked}`);
+      if (!feature?.bbox) wrong.push(`mapbox bbox ${asked}`);
+      if (!first?.viewport) wrong.push(`google viewport ${asked}`);
+      const result = precisely_.responses[0]?.results?.[0];
+      if (
+        result?.address?.city?.longName !== town ||
+        result.explanation?.addressMatch?.type !== "ADMIN"
+      ) {
+        wrong.push(`precisely ${asked}`);
+      }
+      // The calibrated score rates rooftops, so a town carries none.
+      if (result?.score !== undefined) wrong.push(`precisely score ${asked}`);
+    }
+    expect(wrong).toEqual([]);
+  }, 120_000);
+
   describe("google", () => {
     const client = google({ baseUrl: OG_RI_URL, apiKey: "unused", logLevel: "off" });
 
@@ -57,9 +141,11 @@ describe.runIf(OG_RI_URL)("company flows against og on a Rhode Island Pack", () 
       expect(region?.viewport?.low?.latitude).toBeLessThan(region?.viewport?.high?.latitude ?? 0);
       const towns = await client.places.searchText({
         textQuery: TOWN,
-        fieldMask: ["places.types"],
+        fieldMask: ["places.types", "places.viewport"],
       });
-      expect(towns.places?.[0]?.types).toEqual(["locality", "political"]);
+      const town = towns.places?.[0];
+      expect(town?.types).toEqual(["locality", "political"]);
+      expect(town?.viewport?.low?.latitude).toBeLessThan(town?.viewport?.high?.latitude ?? 0);
     });
 
     it("a type filter keeps only places of the type", async () => {

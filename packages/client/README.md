@@ -266,7 +266,8 @@ const { responses } = await client.geocode({
 
 When it asks Precisely, the client fetches the Bearer token itself, keeps it until shortly before it expires, and fetches a fresh one when a call answers 401.
 When it asks og, no token call is made, and the client it returns has no `token` method.
-With `apiKey` and `apiSecret` it also has `token()`, which hands the Bearer token to something else.
+A `baseUrl` given beside `apiKey`, `apiSecret` and `region` asks og, and none of the three is sent.
+With `apiKey` and `apiSecret` and no `baseUrl` it also has `token()`, which hands the Bearer token to something else.
 
 ## What every client shares
 

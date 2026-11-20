@@ -62,9 +62,20 @@ const onVendor = (
 ): PreciselyVendorClient =>
   precisely({ apiKey: KEY, apiSecret: SECRET, fetch, logLevel: "off", ...options });
 
-/** A client that asks og, which takes no key, secret or token. */
+/**
+ * A client that asks og, which takes no key, secret or token. It keeps the key, secret and region a
+ * caller already passes for Precisely, as a one-line switch does, and none of them may be sent.
+ */
 const onOg = (fetch: Fetch, options: Partial<PreciselyOgOptions> = {}): PreciselyClient =>
-  precisely({ baseUrl: `${OG}/`, fetch, logLevel: "off", ...options });
+  precisely({
+    baseUrl: `${OG}/`,
+    apiKey: KEY,
+    apiSecret: SECRET,
+    region: "eu1",
+    fetch,
+    logLevel: "off",
+    ...options,
+  });
 
 const methodOf = (fetch: Fetch, call = 0): string | undefined => fetch.mock.calls[call]![1]?.method;
 const rawBodyOf = (fetch: Fetch, call = 0): unknown => fetch.mock.calls[call]![1]?.body;

@@ -72,13 +72,19 @@ const HOST = "https://api.cloud.precisely.com";
 /** The regions Precisely answers real-time Geo Addressing calls from, besides its default host. */
 export type PreciselyRegion = "eu1" | "au1" | "gb1";
 
-/** Options for {@link precisely} against an og server. */
+/**
+ * Options for {@link precisely} against an og server.
+ * A key, secret and region the caller already passes for Precisely may stay, so switching is one added line, and none of them is sent.
+ */
 export interface PreciselyOgOptions extends CommonOptions {
   /** An og server. Requests go to `<baseUrl>/compat/precisely`, and no key, secret or token is sent. */
   baseUrl: string;
-  apiKey?: undefined;
-  apiSecret?: undefined;
-  region?: undefined;
+  /** Accepted and never sent to og. */
+  apiKey?: string | undefined;
+  /** Accepted and never sent to og. */
+  apiSecret?: string | undefined;
+  /** Accepted and unused, since og answers every call itself. */
+  region?: PreciselyRegion | undefined;
 }
 
 /** Options for {@link precisely} against Precisely itself. */

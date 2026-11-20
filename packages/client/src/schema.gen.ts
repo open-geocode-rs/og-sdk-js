@@ -683,7 +683,8 @@ export interface components {
              * Format: float
              * @description Probability, from 0 to 1, that this is the address the query asks
              *     for. Of results at 0.8, about 8 in 10 are correct. Present only when
-             *     the Pack is calibrated. `0` on a `fallback` result.
+             *     the Pack is calibrated and the query states a house number, the
+             *     queries calibration measures. `0` on a `fallback` result.
              */
             confidence?: number;
             /**
