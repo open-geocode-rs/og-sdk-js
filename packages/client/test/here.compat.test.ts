@@ -287,12 +287,12 @@ describe.runIf(OG_URL)("here against og", () => {
       });
     });
 
-    it("answers a search sent as a POST with a route in its body", async () => {
-      const outcome = await client
-        .discover({ q: CASINO, at: AT, limit: 1, route: "BFoz5xJ67i1B1B7PzIhaxL7Y" })
-        .withResponse();
-      expect(outcome.response?.url).not.toContain("route");
-      expect(outcome.data.items).toHaveLength(1);
+    it("refuses a search along a route, which og cannot do", async () => {
+      const error = await failure(
+        client.discover({ q: CASINO, at: AT, limit: 1, route: "BFoz5xJ67i1B1B7PzIhaxL7Y" }),
+      );
+      expect(error).toMatchObject({ status: 400, operation: "discover" });
+      expect(error.body).toMatchObject({ title: "Illegal input for parameter 'route'" });
     });
   });
 
@@ -337,32 +337,21 @@ describe.runIf(OG_URL)("here against og", () => {
   });
 
   describe("signals", () => {
-    it("takes a signal about a result og gave, with no content back", async () => {
-      const found = await client.geocode({ q: ADDRESS, limit: 1 }).withResponse();
-      const item = found.data.items[0]!;
-      await expect(
+    it("is not served by og, which learns nothing from a signal", async () => {
+      const error = await failure(
         client.signals({
           body: [
             {
               action: "here:gs:action:navigate-to",
-              correlationId: found.requestId ?? "",
-              resourceId: item.id,
+              correlationId: "c",
+              resourceId: "r",
               rank: 0,
               timestamp: Date.now(),
             },
           ],
         }),
-      ).resolves.toBeUndefined();
-    });
-
-    it("refuses an action HERE does not list", async () => {
-      const error = await failure(
-        client.signals({
-          body: [{ action: "here:gs:action:like", correlationId: "c", resourceId: "r", rank: 0 }],
-        }),
       );
-      expect(error).toMatchObject({ code: "invalid_request", status: 400, operation: "signals" });
-      expect(error.body).toMatchObject({ title: "Illegal input for parameter 'action'" });
+      expect(error).toMatchObject({ code: "not_found", status: 404, operation: "signals" });
     });
   });
 
@@ -441,17 +430,9 @@ describe.runIf(OG_URL)("here against og", () => {
   describe("batch", () => {
     const tag = `sdk-here-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    it("serves an OpenAPI document of the batch routes og answers", async () => {
-      const document = JSON.parse(await client.batch.openapi()) as {
-        openapi: string;
-        servers: { url: string }[];
-        paths: Record<string, unknown>;
-      };
-      expect(document.openapi).toBe("3.1.0");
-      expect(document.servers[0]!.url).toBe(`${OG_URL}/compat/here/v7`);
-      expect(Object.keys(document.paths)).toEqual(
-        expect.arrayContaining(["/batch/jobs", "/batch/notifications", "/openapi"]),
-      );
+    it("serves no OpenAPI document, which only HERE writes", async () => {
+      const error = await failure(client.batch.openapi());
+      expect(error).toMatchObject({ status: 404 });
     });
 
     it("reports its version and its health", async () => {

@@ -423,7 +423,7 @@ describe.runIf(OG_URL)("precisely against og", () => {
       const outcome = await client
         .proximitySearch({
           preferences: {
-            dataset: "premium-address-points",
+            dataset: "osm",
             distance: { value: 100, distanceUnit: "METER" },
           },
           location: { addressId: "p1", latitude: LAT, longitude: LON, country: "MCO" },
@@ -439,6 +439,17 @@ describe.runIf(OG_URL)("precisely against og", () => {
       expect(seen["proximitySearch"]).toEqual([
         { lat: result.location!.latitude, lon: result.location!.longitude },
       ]);
+    });
+
+    it("refuses a dataset og does not hold", async () => {
+      const error = await caught(
+        client.proximitySearch({
+          preferences: { dataset: "premium-address-points" },
+          location: { latitude: LAT, longitude: LON, country: "MCO" },
+        }),
+      );
+      expect(error).toMatchObject({ code: "invalid_request", status: 400 });
+      expect(error.message).toContain("premium-address-points");
     });
 
     it("refuses a search without a dataset", async () => {

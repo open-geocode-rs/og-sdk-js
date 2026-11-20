@@ -213,24 +213,26 @@ const { items } = await client.geocode({ q: "10 King St W, Toronto" });
 const near = await client.revgeocode({ at: "43.6489,-79.3789" });
 ```
 
-| Method                                                                                         | HERE endpoint                              | On og |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------ | ----- |
-| `geocode`                                                                                      | `GET /v1/geocode`                          | yes   |
-| `revgeocode`                                                                                   | `GET /v1/revgeocode`                       | yes   |
-| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode`                | yes   |
-| `autosuggest`                                                                                  | `GET /v1/autosuggest`                      | yes   |
-| `autocomplete`                                                                                 | `GET /v1/autocomplete`                     | yes   |
-| `discover`                                                                                     | `GET /v1/discover`                         | yes   |
-| `lookup`                                                                                       | `GET /v1/lookup`                           | yes   |
-| `browse`                                                                                       | `GET /v1/browse`                           | yes   |
-| `signals`                                                                                      | `POST /v1/signals`                         | yes   |
-| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`                           | yes   |
-| `batch.notifications.*`                                                                        | `/v7/batch/notifications`                  | yes   |
-| `batch.version`, `health`, `openapi`                                                           | `/v7/version`, `/v7/health`, `/v7/openapi` | yes   |
+| Method                                                                                         | HERE endpoint               | On og |
+| ---------------------------------------------------------------------------------------------- | --------------------------- | ----- |
+| `geocode`                                                                                      | `GET /v1/geocode`           | yes   |
+| `revgeocode`                                                                                   | `GET /v1/revgeocode`        | yes   |
+| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode` | yes   |
+| `autosuggest`                                                                                  | `GET /v1/autosuggest`       | yes   |
+| `autocomplete`                                                                                 | `GET /v1/autocomplete`      | yes   |
+| `discover`                                                                                     | `GET /v1/discover`          | yes   |
+| `lookup`                                                                                       | `GET /v1/lookup`            | yes   |
+| `browse`                                                                                       | `GET /v1/browse`            | yes   |
+| `signals`                                                                                      | `POST /v1/signals`          | no    |
+| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`            | yes   |
+| `batch.notifications.*`                                                                        | `/v7/batch/notifications`   | yes   |
+| `batch.version`, `health`                                                                      | `/v7/version`, `/v7/health` | yes   |
+| `batch.openapi`                                                                                | `/v7/openapi`               | no    |
 
 On og, `browse` filters by the HERE category ids og has a kind of place for, at any of their three levels.
-A chain or a food type asked for finds no place, since og holds neither.
-On og, `signals` are checked and written to og's log, since og keeps no store of them.
+og holds no chain or food type, so `browse` with `chains` or `foodTypes` is refused with HERE's illegal input error.
+og cannot search along a route, so a search with `route` is refused the same way, and so is a page past the 50 results a search gives or the 20 a suggestion gives.
+og learns nothing from a signal and has no OpenAPI document of HERE's, so `signals` and `batch.openapi` answer HERE's not found error.
 A notification is kept by og and called with GET when a job that names it ends.
 
 ### Precisely

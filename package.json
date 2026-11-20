@@ -7,7 +7,7 @@
   ],
   "type": "module",
   "scripts": {
-    "gen": "openapi-typescript https://raw.githubusercontent.com/open-geocode-rs/open-geocode/main/contract/openapi.json -o packages/client/src/schema.gen.ts",
+    "gen": "openapi-typescript og/contract/openapi.json -o packages/client/src/schema.gen.ts",
     "build": "bun run --filter '@open-geocode/client' build && bun run --filter '@open-geocode/autocomplete-core' build && bun run --filter '@open-geocode/autocomplete' build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint",

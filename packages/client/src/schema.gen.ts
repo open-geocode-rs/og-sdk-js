@@ -517,6 +517,14 @@ export interface components {
             /** @description POI category, such as `amenity:cafe`. Present only on POIs. */
             category?: string;
             /**
+             * @description ISO code of a result that is an area: on a country its ISO 3166-1
+             *     alpha-2 code, on an area below it its ISO 3166-2 code, as
+             *     `context` gives them. Absent on any other result, and on an area
+             *     the source data gives no code.
+             * @example MC
+             */
+            code?: string;
+            /**
              * @description How to reach a place: its phone number, website and email, each as
              *     its source writes it. og rewrites none and does not check that one
              *     still answers. Present only on POIs that state at least one.
@@ -529,7 +537,11 @@ export interface components {
              *     find the record again: it outlives a Pack rebuild.
              */
             id: string;
-            /** @description One-line display label: `name` followed by its location. */
+            /**
+             * @description One-line display label: `name` followed by its location. With
+             *     `lang`, each part that names the result or one of its areas is that
+             *     name in the language asked, as `name` and `context` are.
+             */
             label: string;
             layer: components["schemas"]["Layer"];
             /**
@@ -695,8 +707,9 @@ export interface components {
             /**
              * @description The parts of `label` the typed text matched, in order, none
              *     overlapping. Present on `/autocomplete` results, the only ones found
-             *     by text still being typed. Absent when no typed word can be placed
-             *     in the label, as on a place suggested for its category.
+             *     by text still being typed. A place suggested for the kind the text
+             *     names is marked where the typed words lie in its label too. Absent
+             *     when no typed word can be placed in the label.
              */
             highlights?: components["schemas"]["Highlight"][];
             /**
@@ -1007,7 +1020,8 @@ export interface components {
          *       for it.
          *     - `street`: the query's street words against the words of the result's
          *       street, as search counts typos. `matched` when the street has each
-         *       word, or the word an abbreviation stands for. `partial` when a word is
+         *       word, the word an abbreviation stands for, or its abbreviation
+         *       (`Street` for a street written `St`). `partial` when a word is
          *       a typo away or missing. `unmatched` when it has none of them or the
          *       result has no street.
          *     - `unit`: `matched` when the result states the unit, else `unmatched`.
