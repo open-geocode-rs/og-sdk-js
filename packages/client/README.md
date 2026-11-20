@@ -161,7 +161,7 @@ const { results } = await client.geocode.address({ addressQuery: "10 King St W, 
 | `places.autocomplete`  | `POST /v1/places:autocomplete`                           | yes   |
 | `places.get`           | `GET /v1/places/{placeId}`                               | yes   |
 | `places.searchNearby`  | `POST /v1/places:searchNearby`                           | yes   |
-| `places.getPhotoMedia` | `GET /v1/places/{placeId}/photos/{photoReference}/media` | yes   |
+| `places.getPhotoMedia` | `GET /v1/places/{placeId}/photos/{photoReference}/media` | no    |
 | `geocode.address`      | `GET /v4/geocode/address`                                | yes   |
 | `geocode.location`     | `GET /v4/geocode/location`                               | yes   |
 | `geocode.place`        | `GET /v4/geocode/places/{placeId}`                       | yes   |
