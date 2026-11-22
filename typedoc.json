@@ -20,5 +20,19 @@
   "out": "docs",
   "name": "og-sdk-js",
   "excludePrivate": true,
+  "highlightLanguages": [
+    "bash",
+    "console",
+    "css",
+    "diff",
+    "html",
+    "javascript",
+    "json",
+    "jsonc",
+    "json5",
+    "yaml",
+    "tsx",
+    "typescript"
+  ],
   "treatWarningsAsErrors": true
 }

@@ -16,41 +16,44 @@ All three run in browsers, Node, Bun and Deno.
 npm i @open-geocode/client
 ```
 
-The import you pick is the response shape you get.
+### Switch an existing integration
 
-| Import                           | Speaks          | Asks                               |
-| -------------------------------- | --------------- | ---------------------------------- |
-| `@open-geocode/client`           | og's own API    | og                                 |
-| `@open-geocode/client/google`    | Google's API    | og at `/compat/google`, or Google  |
-| `@open-geocode/client/mapbox`    | Mapbox's API    | og at `/compat/mapbox`, or Mapbox  |
-| `@open-geocode/client/here`      | HERE's API      | og at `/compat/here`, or HERE      |
-| `@open-geocode/client/precisely` | Precisely's API | og at `/compat/precisely`, or them |
+Choose the API your app already uses. The import chooses the request and response shape. Client configuration chooses the server.
+
+| Provider  | JavaScript import                | og HTTP prefix      |
+| --------- | -------------------------------- | ------------------- |
+| Google    | `@open-geocode/client/google`    | `/compat/google`    |
+| Mapbox    | `@open-geocode/client/mapbox`    | `/compat/mapbox`    |
+| HERE      | `@open-geocode/client/here`      | `/compat/here`      |
+| Precisely | `@open-geocode/client/precisely` | `/compat/precisely` |
+
+If you already call a supported API over HTTP, point your requests at its og prefix and use your deployment's authentication. You can keep an existing vendor SDK where that SDK can target og and uses a supported API version.
+
+If your app uses this package's Mapbox client, the switch is in its configuration:
+
+```diff
+ import { mapbox } from "@open-geocode/client/mapbox";
+
+-const client = mapbox({ accessToken });
++const client = mapbox({ baseUrl: "http://localhost:8080" });
+
+ const { features } = await client.geocoding.forward({ q: "1 Market Street, San Francisco, CA" });
+ console.log(features[0]?.properties.full_address);
+```
+
+The same pattern applies to Google, HERE and Precisely. With `baseUrl`, og answers using its Pack and the selected vendor's API shape. For a direct vendor call, configure that vendor's credentials. See the [workflow matrix and migration limits](packages/client/README.md#switch-an-existing-integration).
+
+### Start with og's native API
 
 ```ts
 import { createClient } from "@open-geocode/client";
 
 const og = createClient({ baseUrl: "http://localhost:8080" });
 const { features } = await og.geocode({ q: "10 King St W, Toronto", include: ["timezone"] });
-console.log(features[0].properties.label, features[0].geometry.coordinates);
+console.log(features[0]?.properties.label, features[0]?.geometry.coordinates);
 ```
 
-The og client answers in og's own shape, with extras through `include`, batches and jobs.
-
-```ts
-import { mapbox } from "@open-geocode/client/mapbox";
-
-const client = mapbox({ accessToken });
-// The day you switch to og, this is the only line that changes.
-// const client = mapbox({ baseUrl: "http://localhost:8080" });
-
-const { features } = await client.geocoding.forward({ q: "10 King St W, Toronto" });
-console.log(features[0].properties.full_address);
-```
-
-A vendor client uses that vendor's method names and request shape, and returns the JSON untouched.
-With a `baseUrl` it asks your og server under `/compat/<vendor>`, and no vendor key is needed.
-With the vendor's credentials it asks the vendor itself.
-A client you do not import never reaches your bundle.
+The native client uses og's own response shape, with extras through `include`, batches and jobs. Importing a vendor subpath loads only that vendor client.
 
 - **Typed from the source.**
   The og client is typed from og's OpenAPI contract, and each vendor client from that vendor's documented API.

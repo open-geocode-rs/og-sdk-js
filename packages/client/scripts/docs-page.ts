@@ -25,6 +25,7 @@ interface Tab {
   credentials: string;
   cache: string;
   example: string;
+  exclusions?: [feature: string, behavior: string][];
   rows: Record<string, Row>;
 }
 
@@ -83,6 +84,14 @@ const { places } = await client.places.searchText({
   textQuery: "Casino de Monte-Carlo",
   fieldMask: ["places.id", "places.displayName", "places.location"],
 });`,
+    exclusions: [
+      ["Google-issued Place IDs", "Use identifiers returned by og for follow-up calls."],
+      [
+        "Google Photos, reviews and user ratings",
+        "These fields are omitted and og cannot serve a photo.",
+      ],
+      ["Places Text Search pagination", "og returns one page and omits nextPageToken."],
+    ],
     rows: {
       "places.searchText": ["POST /v1/places:searchText"],
       "places.autocomplete": ["POST /v1/places:autocomplete"],
@@ -110,6 +119,10 @@ const { places } = await client.places.searchText({
 const client = mapbox({ baseUrl: "http://localhost:8080" }); // or mapbox({ accessToken })
 const { features } = await client.geocoding.forward({ q: "10 King St W, Toronto" });
 console.log(features[0].properties.full_address);`,
+    exclusions: [
+      ["Mapbox-issued feature IDs", "Use the mapbox_id returned by og for Search Box retrieve."],
+      ["Geocoding v5", "Point v6 HTTP requests to og or port the v5 client."],
+    ],
     rows: {
       "geocoding.forward": ["GET /search/geocode/v6/forward"],
       "geocoding.reverse": ["GET /search/geocode/v6/reverse"],
@@ -137,6 +150,13 @@ console.log(features[0].properties.full_address);`,
 const client = here({ baseUrl: "http://localhost:8080" }); // or here({ apiKey })
 const { items } = await client.geocode({ q: "10 King St W, Toronto" });
 const near = await client.revgeocode({ at: "43.6489,-79.3789" });`,
+    exclusions: [
+      ["HERE-issued place IDs", "Use identifiers returned by og for follow-up calls."],
+      [
+        "HERE routing and live traffic",
+        "The compatibility surface covers Geocoding and Search v1 and Batch v7.",
+      ],
+    ],
     rows: {
       geocode: ["GET /v1/geocode"],
       revgeocode: ["GET /v1/revgeocode"],
@@ -146,7 +166,7 @@ const near = await client.revgeocode({ at: "43.6489,-79.3789" });`,
       discover: ["GET /v1/discover"],
       lookup: ["GET /v1/lookup"],
       browse: ["GET /v1/browse"],
-      signals: ["POST /v1/signals"],
+      signals: ["POST /v1/signals", false],
       "batch.create": ["POST /v7/batch/jobs"],
       "batch.list": ["GET /v7/batch/jobs"],
       "batch.deleteMany": ["DELETE /v7/batch/jobs"],
@@ -158,7 +178,7 @@ const near = await client.revgeocode({ at: "43.6489,-79.3789" });`,
       "batch.delete": ["DELETE /v7/batch/jobs/{jobId}"],
       "batch.version": ["GET /v7/version"],
       "batch.health": ["GET /v7/health"],
-      "batch.openapi": ["GET /v7/openapi"],
+      "batch.openapi": ["GET /v7/openapi", false],
       "batch.notifications.create": ["POST /v7/batch/notifications"],
       "batch.notifications.list": ["GET /v7/batch/notifications"],
       "batch.notifications.get": ["GET /v7/batch/notifications/{notificationId}"],
@@ -184,6 +204,14 @@ const client = precisely({ baseUrl: "http://localhost:8080" }); // or precisely(
 const { responses } = await client.geocode({
   addresses: [{ addressLines: ["10 King St W, Toronto"], country: "CA" }],
 });`,
+    exclusions: [
+      ["Precisely-issued PB_KEY values", "The identifier in this slot identifies an og record."],
+      [
+        "Postal certification and delivery guarantees",
+        "Verify standardizes and matches against the Pack.",
+      ],
+      ["Bulk job email delivery", "Poll the og job status for completion."],
+    ],
     rows: {
       geocode: ["POST /v1/geocode"],
       reverseGeocode: ["POST /v1/reverse-geocode"],
@@ -244,6 +272,12 @@ function panel(tab: Tab): string {
       return `<tr><th scope="row"><code>${escape(name)}</code></th><td class="left"><code>${escape(endpoint)}</code></td><td>${pill}</td></tr>`;
     })
     .join("\n");
+  const exclusions = tab.exclusions
+    ?.map(
+      ([feature, behavior]) =>
+        `<tr><th scope="row">${escape(feature)}</th><td class="left">${escape(behavior)}</td></tr>`,
+    )
+    .join("\n");
   return `<section role="tabpanel" id="panel-${tab.id}" aria-labelledby="tab-${tab.id}" hidden>
 <h2><code>${escape(tab.importPath)}</code></h2>
 <p>${rich(`\`${tab.factory}\` speaks ${tab.speaks}.`)}</p>
@@ -257,11 +291,36 @@ function panel(tab: Tab): string {
 <tbody>
 ${rows}
 </tbody></table></div>
+${
+  exclusions
+    ? `<h2>Deliberate exclusions</h2>
+<div class="scroll"><table>
+<thead><tr><th scope="col" class="left">Feature</th><th scope="col" class="left">What to expect</th></tr></thead>
+<tbody>${exclusions}</tbody>
+</table></div>`
+    : ""
+}
 </section>`;
 }
 
 const overview = `<section role="tabpanel" id="panel-imports" aria-labelledby="tab-imports">
-<h2>The import picks the response shape</h2>
+<h2>Switch an existing integration</h2>
+<ul class="plain">
+<li>Direct HTTP. Use your og deployment's <code>/compat/&lt;vendor&gt;</code> prefix with the supported endpoint path.</li>
+<li>Existing vendor SDK. Keep it if it can target og and uses a supported API version. Check the package and version first.</li>
+<li>og vendor client. Install the matching subpath and set <code>baseUrl</code> to your deployment.</li>
+</ul>
+<h2>Compare workflows on og</h2>
+<p>Coverage depends on the Pack you serve. Open a vendor tab for endpoints and deliberate exclusions.</p>
+<div class="scroll"><table>
+<thead><tr><th scope="col" class="left">Vendor</th><th scope="col">Forward and reverse</th><th scope="col">Suggestions and follow-up</th><th scope="col">Batch geocoding</th></tr></thead>
+<tbody>
+<tr><th scope="row">Google</th><td>Geocoding v4</td><td>Places v1 autocomplete and details</td><td>Unavailable</td></tr>
+<tr><th scope="row">Mapbox</th><td>Geocoding v6</td><td>Search Box v1 suggest and retrieve</td><td>Geocoding v6 request batch</td></tr>
+<tr><th scope="row">HERE</th><td>Geocoding and Search v1</td><td>Search v1 autosuggest and lookup</td><td>Batch v7 jobs</td></tr>
+<tr><th scope="row">Precisely</th><td>Geo Addressing v1</td><td>Autocomplete and lookup</td><td>v2 bulk jobs</td></tr>
+</tbody></table></div>
+<h2>Client imports</h2>
 <div class="scroll"><table>
 <thead><tr><th scope="col" class="left">Import</th><th scope="col" class="left">Factory</th><th scope="col" class="left">Methods, requests and responses</th><th scope="col" class="left">Asks</th></tr></thead>
 <tbody>
@@ -275,7 +334,7 @@ ${TABS.map(
 <ul class="plain">
 <li>With <code>baseUrl</code>, it asks your og server under <code>/compat/&lt;vendor&gt;</code>. No vendor key is needed, and none is sent.</li>
 <li>With the vendor's credentials and no <code>baseUrl</code>, it asks the vendor itself, with the key sent the vendor's own way.</li>
-<li>Either way the method names, the request and the JSON that comes back are the vendor's own. The client never translates. og's server does.</li>
+<li>The request and response follow the selected API. When og answers, field values come from its Pack and IDs identify og records.</li>
 </ul>
 <h2>What every client shares</h2>
 <ul class="plain">
@@ -288,7 +347,7 @@ ${TABS.map(
 <p>Every og answer names its sources in <code>geocoding.attribution</code>. Show those credits wherever you show the results.</p>
 </section>`;
 
-const tabs = [{ id: "imports", title: "Imports" }, ...TABS];
+const tabs = [{ id: "imports", title: "Compatibility" }, ...TABS];
 const buttons = tabs
   .map(
     (tab, index) =>
@@ -336,7 +395,7 @@ th[scope=row],.left{text-align:left;font-weight:400}
 <body>
 <main>
 <h1>og-sdk-js clients</h1>
-<p class="mut">The import you pick is the response shape you get. Each tab lists one client's methods, read off the client itself.</p>
+<p class="mut">Choose the API your app already uses, then point it at your og deployment. For new integrations, use the native og tab.</p>
 <div role="tablist" aria-label="Client">${buttons}</div>
 ${overview}
 ${TABS.map(panel).join("\n")}

@@ -1,7 +1,35 @@
 # @open-geocode/client
 
 The JavaScript and TypeScript client for [open-geocode](https://github.com/open-geocode-rs/open-geocode), the self-hosted geocoder.
-The import you pick is the response shape you get.
+
+## Switch an existing integration
+
+| If your app uses                  | Switch to og                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Direct HTTP                       | Keep the request format for the supported version. Change the URL to `<og-base-url>/compat/<vendor>/<endpoint>` and use your deployment's authentication. |
+| A vendor SDK                      | Check its API version and whether it can target your og endpoint. If it cannot, use direct HTTP or this package's vendor client.                          |
+| A vendor client from this package | Set its `baseUrl` to your og deployment. Keep the same methods and response handling.                                                                     |
+
+### Compare workflows on og
+
+Coverage depends on the Pack you serve. Each link lists the supported API versions, endpoints and differences that affect a migration.
+
+| Vendor                  | Forward           | Reverse              | Suggestions and follow-up          | Batch geocoding            |
+| ----------------------- | ----------------- | -------------------- | ---------------------------------- | -------------------------- |
+| [Google](#google)       | Geocoding v4      | Geocoding v4         | Places v1 autocomplete and details | Unavailable                |
+| [Mapbox](#mapbox)       | Geocoding v6      | Geocoding v6         | Search Box v1 suggest and retrieve | Geocoding v6 request batch |
+| [HERE](#here)           | Search v1 geocode | Search v1 revgeocode | Search v1 autosuggest and lookup   | Batch v7 jobs              |
+| [Precisely](#precisely) | Geo Addressing v1 | Geo Addressing v1    | Autocomplete and lookup            | v2 bulk jobs               |
+
+IDs returned by og identify og records. Re-query stored vendor IDs by address or coordinates before switching, and keep follow-up calls on the same service that produced the ID.
+
+```sh
+curl --get 'http://localhost:8080/compat/mapbox/search/geocode/v6/forward' \
+  --data-urlencode 'q=1 Market Street, San Francisco, CA' \
+  --data-urlencode 'limit=1'
+```
+
+## Install the client
 
 | Import                           | Factory                              | Methods, requests and responses | Asks                               |
 | -------------------------------- | ------------------------------------ | ------------------------------- | ---------------------------------- |
@@ -104,32 +132,21 @@ for await (const line of og.jobs.lines(job.id)) console.log(JSON.parse(line));
 Every og answer names its sources in `geocoding.attribution`.
 Show those credits wherever you show the results.
 
-## The vendor clients
+## Vendor client configuration
 
-A vendor client speaks that vendor's API.
-Its method names, its request parameters and its response types are the vendor's own, and the JSON comes back exactly as the server sent it.
-The client never translates.
-og's server does, under `/compat/<vendor>`.
+Each vendor client preserves that API's request and response shapes. With `baseUrl` set to your og deployment, the client adds `/compat/<vendor>` and omits vendor credentials. Configure your gateway's authentication separately. With the vendor's credentials and no `baseUrl`, requests go directly to the vendor.
 
-Give a vendor client a `baseUrl` and it asks your og server.
-No vendor key is needed, and none is sent.
+The constructor change below applies to apps already using this package.
 
-```ts
-import { mapbox } from "@open-geocode/client/mapbox";
+```diff
+ import { mapbox } from "@open-geocode/client/mapbox";
 
-const client = mapbox({ baseUrl: "http://localhost:8080" });
-const { features } = await client.geocoding.forward({ q: "10 King St W, Toronto" });
-console.log(features[0].properties.full_address);
+-const client = mapbox({ accessToken });
++const client = mapbox({ baseUrl: "http://localhost:8080" });
+
+ const { features } = await client.geocoding.forward({ q: "1 Market Street, San Francisco, CA" });
+ console.log(features[0]?.properties.full_address);
 ```
-
-Give it the vendor's credentials and no `baseUrl`, and it asks the vendor itself, with the key sent the vendor's own way.
-
-```ts
-const client = mapbox({ accessToken: "pk..." });
-```
-
-The code that reads the answer is the same in both cases.
-Moving an app from a vendor to og is a change of one line.
 
 | Client        | Credentials for the vendor | Sent as                                          |
 | ------------- | -------------------------- | ------------------------------------------------ |
@@ -138,7 +155,7 @@ Moving an app from a vendor to og is a change of one line.
 | `here()`      | `apiKey`, or `bearerToken` | the `apiKey` query parameter, or a Bearer header |
 | `precisely()` | `apiKey` and `apiSecret`   | a Bearer token fetched from `/auth/v2/token`     |
 
-A method the vendor has and og does not serve fails with code `unsupported` when the client asks og.
+The endpoint tables describe the current local compatibility engine. Check the engine version and Pack your deployment serves before switching traffic.
 
 ### Google
 
@@ -173,6 +190,12 @@ A type og has no category for finds no place.
 og holds no photos, so on og `places.getPhotoMedia` answers Google's own error for a photo the place does not have.
 On og, `geocode.destinations` states a destination's place and the entrances OpenStreetMap maps for it, the main one `PREFERRED`.
 
+| Deliberately excluded                      | What to expect                                                              |
+| ------------------------------------------ | --------------------------------------------------------------------------- |
+| Google-issued Place IDs and resource names | og uses its own identifiers. Fetch details using an ID from an og response. |
+| Google Photos, reviews and user ratings    | og omits this content. The photo route cannot return an image.              |
+| Places Text Search pagination              | og returns one page and omits `nextPageToken`.                              |
+
 ### Mapbox
 
 Geocoding v6 and Search Box v1.
@@ -200,6 +223,13 @@ const place = await client.searchbox.retrieve({ id: suggestions[0].mapbox_id, se
 
 On og, `searchbox.listCategories` gives og's own list of ids, named in English.
 `searchbox.category` takes those ids, and any id whose words name a kind of place, such as `swimming_pool`.
+
+| Deliberately excluded     | What to expect                                                         |
+| ------------------------- | ---------------------------------------------------------------------- |
+| Mapbox-issued feature IDs | Use the `mapbox_id` returned by og for Search Box retrieve.            |
+| Geocoding v5              | The compatibility route serves Geocoding v6. A v5 client needs a port. |
+
+Mapbox Search JS Core 1.6.0 uses a fixed Mapbox host for Geocoding v6. For that client, switch the call to v6 HTTP or use this package's Mapbox client.
 
 ### HERE
 
@@ -231,7 +261,7 @@ const near = await client.revgeocode({ at: "43.6489,-79.3789" });
 
 On og, `browse` filters by the HERE category ids og has a kind of place for, at any of their three levels.
 og holds no chain or food type, so `browse` with `chains` or `foodTypes` is refused with HERE's illegal input error.
-og cannot search along a route, so a search with `route` is refused the same way, and so is a page past the 50 results a search gives or the 20 a suggestion gives.
+Discover can filter results along a route. An invalid `route` returns HERE's illegal input error.
 og learns nothing from a signal and has no OpenAPI document of HERE's, so `signals` and `batch.openapi` answer HERE's not found error.
 A notification is kept by og and called with GET when a job that names it ends.
 og calls back only a host its operator allows with `serve --hook-host`, and refuses any other, so notifications work only where that is set.
@@ -251,21 +281,21 @@ const { responses } = await client.geocode({
 });
 ```
 
-| Method                                            | Precisely endpoint                        | On og   |
-| ------------------------------------------------- | ----------------------------------------- | ------- |
-| `geocode`                                         | `POST /v1/geocode`                        | yes     |
-| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes     |
-| `lookup`                                          | `POST /v1/lookup`                         | yes     |
-| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes     |
-| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes     |
-| `verify`                                          | `POST /v1/verify`                         | yes     |
-| `autocompletePostalCity`                          | `POST /v1/autocomplete/postal-city`       | yes     |
-| `proximitySearch`                                 | `POST /v1/proximity-search`               | yes     |
-| `explainAddressCode`                              | `POST /v1/explain-addresscode`            | in part |
-| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes     |
-| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes     |
-| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes     |
-| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | yes     |
+| Method                                            | Precisely endpoint                        | On og               |
+| ------------------------------------------------- | ----------------------------------------- | ------------------- |
+| `geocode`                                         | `POST /v1/geocode`                        | yes                 |
+| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes                 |
+| `lookup`                                          | `POST /v1/lookup`                         | yes                 |
+| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes                 |
+| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes                 |
+| `verify`                                          | `POST /v1/verify`                         | Pack-based matching |
+| `autocompletePostalCity`                          | `POST /v1/autocomplete/postal-city`       | yes                 |
+| `proximitySearch`                                 | `POST /v1/proximity-search`               | yes                 |
+| `explainAddressCode`                              | `POST /v1/explain-addresscode`            | in part             |
+| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes                 |
+| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes                 |
+| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes                 |
+| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | Pack-based matching |
 
 On og, `explainAddressCode` explains Global Match Codes, the code og's `verify` gives, and answers Precisely's error for the other code types.
 og starts a bulk job as soon as it is submitted, so a job is often done before `bulk.cancel` reaches it, and the cancel then answers Precisely's error for a job that can no longer be canceled.
@@ -274,6 +304,12 @@ When it asks Precisely, the client fetches the Bearer token itself, keeps it unt
 When it asks og, no token call is made, and the client it returns has no `token` method.
 A `baseUrl` given beside `apiKey`, `apiSecret` and `region` asks og, and none of the three is sent.
 With `apiKey` and `apiSecret` and no `baseUrl` it also has `token()`, which hands the Bearer token to something else.
+
+| Deliberately excluded                        | What to expect                                                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Precisely-issued `PB_KEY` values             | The identifier in that slot identifies an og record. Existing Precisely keys require a fresh lookup. |
+| Postal certification and delivery guarantees | Verify standardizes and matches against your Pack.                                                   |
+| Bulk job email delivery                      | Poll the og job status for completion.                                                               |
 
 ## What every client shares
 
