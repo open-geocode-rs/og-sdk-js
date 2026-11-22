@@ -2,14 +2,14 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import { GeocoderError, NotFoundError } from "../src/errors.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
+import { GeocoderError, NotFoundError } from "../../../src/errors.ts";
 import {
   type BatchJsonlRecord,
   type GeocodeResultItem,
   here,
   type JobDetailResponse,
-} from "../src/here.ts";
+} from "../../../src/providers/here/index.ts";
 
 const OG_URL = process.env["OG_URL"];
 

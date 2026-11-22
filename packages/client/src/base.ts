@@ -40,7 +40,7 @@ export interface PluginCall {
   /** The arguments given to the method, without the trailing request options. */
   readonly args: readonly unknown[];
   readonly options: RequestOptions | undefined;
-  /** Makes the same call on another client that speaks the same API. */
+  /** Replays the call on another client using that client's own headers. */
   run(client: ClientInfo): Promise<Outcome>;
   /** The points of the results in an answer to this call, in order. A result without a point is left out. */
   positions(data: unknown): Position[];
@@ -211,10 +211,14 @@ export function createBase(spec: BaseSpec): Base {
       });
     }
     const rule = step.cache ?? spec.cache ?? NEVER;
+    const requestId = transport.requestId(response.headers);
+    if (shape === "og" && data !== null && typeof data === "object") {
+      Object.defineProperty(data, "_request_id", { value: requestId, enumerable: false });
+    }
     return {
       data,
       response,
-      requestId: transport.requestId(response.headers),
+      requestId,
       server,
       cache: server === "og" ? UNLIMITED : typeof rule === "function" ? rule(response) : rule,
     };
@@ -240,7 +244,8 @@ export function createBase(spec: BaseSpec): Base {
             operation: step.method,
             provider: other.server,
           });
-        return found(...step.args, step.options).withResponse();
+        const { signal, timeout, maxRetries } = step.options ?? {};
+        return found(...step.args, { signal, timeout, maxRetries }).withResponse();
       },
       positions: (data) => spec.positions?.(step.method, data) ?? [],
     };

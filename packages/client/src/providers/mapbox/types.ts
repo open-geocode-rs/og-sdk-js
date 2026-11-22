@@ -59,8 +59,8 @@ export interface GeocodingForwardOptions {
   autocomplete?: boolean | undefined;
   /** Limits results to a box. */
   bbox?: BBoxParam | undefined;
-  /** The response format, `geojson` or the backward-compatible `v5`. Default `geojson`. The response types describe `geojson`. */
-  format?: "geojson" | "v5" | undefined;
+  /** Geocoding v6 GeoJSON output. Default `geojson`. */
+  format?: "geojson" | undefined;
   /** IETF language tags, at most 20 and unique. The first is the main one, and the rest add `translations` to the context. */
   language?: List<string> | undefined;
   /** The most results to answer. Default 5, at most 10. */

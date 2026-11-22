@@ -175,7 +175,7 @@ bun run size           # size budgets of every client and plugin
 bun run docs           # API reference into docs/
 bun run docs:page      # the local docs page, into docs-preview/
 bun run test:ecosystem # build a real Vite app, check a client pulls in no other vendor, and run under Node, Bun and Deno
-bun run gen            # regenerate og's types from the pinned og submodule's contract
+bun run gen            # regenerate og's types from the pinned OG revision's OpenAPI contract
 ```
 
 Each vendor client is tested twice.
@@ -183,18 +183,22 @@ One suite replays responses in the vendor's documented shape, kept under `packag
 The fixtures are synthetic, with every value made up, except Google's, which are documentation examples credited in `packages/client/test/fixtures/google/NOTICE.md`.
 The other suite calls a real og server's `/compat` routes, and runs when you point it at one.
 
-The og-backed suites run on two Packs.
-The vendor suites assert a Monaco Pack.
-The company flows (`packages/client/test/flows.compat.test.ts`) run on a Rhode Island Pack, with regions, US addresses and towns that share a word, calibrated so that results carry scores.
-`ecosystem-tests/og/serve.sh` builds both from OSM extracts, calibrates the Rhode Island one with the held-out OpenAddresses rows beside it, and serves og on each with callbacks to this machine allowed, which the HERE notification tests need.
-CI runs it the same way.
+Hosted SDK CI runs the fixture, package, runtime and browser checks. The live
+suite uses an existing Monaco Pack for endpoint contracts and an existing USA
+Pack for the National Address Database smoke test. The USA sample covers eight
+states, with clean and messy forms for each address. It checks the top result
+against the published point. See the [fixture source](ecosystem-tests/og/NOTICE.md).
+
+Run both against an OG binary that exposes the compatibility routes:
 
 ```sh
-cargo build --release --bin open-geocode --manifest-path og/Cargo.toml
-ecosystem-tests/og/serve.sh og/target/release/open-geocode .og-test 18900 18901
-OG_URL=http://127.0.0.1:18900 OG_RI_URL=http://127.0.0.1:18901 \
-  OG_TEST_ADDRESS="12 Boulevard des Moulins Monaco" bun run test
+ecosystem-tests/og/serve.sh /path/to/open-geocode /path/to/monaco-pack /path/to/usa-pack .og-test
 ```
+
+To test servers you already have running, set `OG_URL` for Monaco and
+`OG_USA_URL` for the USA. Set `OG_TEST_ADDRESS="12 Boulevard des Moulins Monaco"`
+when using the Monaco Pack. The HERE webhook cases need the server started with
+`--hook-host 127.0.0.1`.
 
 `examples/plain-html` shows the widget on a checkout form.
 

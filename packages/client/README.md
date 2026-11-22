@@ -198,7 +198,7 @@ On og, `geocode.destinations` states a destination's place and the entrances Ope
 
 ### Mapbox
 
-Geocoding v6 and Search Box v1.
+Geocoding v6 and Search Box v1. The JavaScript client expects v6 GeoJSON output for Geocoding.
 
 ```ts
 import { mapbox } from "@open-geocode/client/mapbox";
@@ -230,6 +230,27 @@ On og, `searchbox.listCategories` gives og's own list of ids, named in English.
 | Geocoding v5              | The compatibility route serves Geocoding v6. A v5 client needs a port. |
 
 Mapbox Search JS Core 1.6.0 uses a fixed Mapbox host for Geocoding v6. For that client, switch the call to v6 HTTP or use this package's Mapbox client.
+
+#### Keep the published Mapbox SDK
+
+The live SDK suite tests `@mapbox/mapbox-sdk@0.16.2` with forward and reverse
+Geocoding v6. Set `origin` to your og URL with `/compat/mapbox` appended. The
+Mapbox constructor still requires a token it can parse. Use a dummy token in
+that slot and configure your og deployment's authentication separately.
+
+```js
+const createMapboxClient = require("@mapbox/mapbox-sdk");
+const geocoding = require("@mapbox/mapbox-sdk/services/geocoding-v6");
+
+const accessToken = "pk.eyJ1IjoibG9jYWwtdGVzdCJ9.dummy";
+const client = geocoding(
+  createMapboxClient({
+    origin: "http://127.0.0.1:8080/compat/mapbox",
+    accessToken,
+  }),
+);
+const { body } = await client.forwardGeocode({ query: "12 Boulevard des Moulins, Monaco" }).send();
+```
 
 ### HERE
 

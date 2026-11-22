@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
 import {
   BadRequestError,
   GeocoderError,
@@ -9,22 +9,26 @@ import {
   NotFoundError,
   PermissionDeniedError,
   RateLimitError,
-} from "../src/errors.ts";
-import { google, type GoogleClient, type GoogleOptions } from "../src/google.ts";
-import autocompleteOrigin from "./fixtures/google/autocomplete-origin.json" with { type: "json" };
-import invalidArgument from "./fixtures/google/error-invalid-argument.json" with { type: "json" };
-import permissionDenied from "./fixtures/google/error-permission-denied.json" with { type: "json" };
-import geocodeAddress from "./fixtures/google/geocode-address.json" with { type: "json" };
-import placeDetailsMoved from "./fixtures/google/place-details-moved.json" with { type: "json" };
-import placeDetails from "./fixtures/google/place-details.json" with { type: "json" };
-import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply, urlOf } from "./helpers.ts";
+} from "../../../src/errors.ts";
+import {
+  google,
+  type GoogleClient,
+  type GoogleOptions,
+} from "../../../src/providers/google/index.ts";
+import autocompleteOrigin from "../../fixtures/google/autocomplete-origin.json" with { type: "json" };
+import invalidArgument from "../../fixtures/google/error-invalid-argument.json" with { type: "json" };
+import permissionDenied from "../../fixtures/google/error-permission-denied.json" with { type: "json" };
+import geocodeAddress from "../../fixtures/google/geocode-address.json" with { type: "json" };
+import placeDetailsMoved from "../../fixtures/google/place-details-moved.json" with { type: "json" };
+import placeDetails from "../../fixtures/google/place-details.json" with { type: "json" };
+import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply, urlOf } from "../../helpers.ts";
 
 /**
  * A documented example that Google's docs shorten with `...` or `/.../`.
  * The file is the example as printed, and only the elision marks are taken out on load.
  */
 function elided(name: string): Record<string, unknown> {
-  const printed = readFileSync(new URL(`./fixtures/google/${name}`, import.meta.url), "utf8");
+  const printed = readFileSync(new URL(`../../fixtures/google/${name}`, import.meta.url), "utf8");
   return JSON.parse(
     printed.replace(/^\s*(\.\.\.|\/\.\.\.\/)\s*$/gm, "").replace(/,(\s*[\]}])/g, "$1"),
   ) as Record<string, unknown>;
@@ -712,7 +716,7 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
     for (const [index, [run, path]] of calls.entries()) {
       await expect(run()).resolves.toEqual({ from: "other" });
       expect(urlOf(other.fetch, index).pathname).toBe(`/compat/google${path}`);
-      expect(headersOf(other.fetch, index)["x-trace"]).toBe("t1");
+      expect(headersOf(other.fetch, index)["x-trace"]).toBeUndefined();
     }
     expect(fetch).not.toHaveBeenCalled();
   });

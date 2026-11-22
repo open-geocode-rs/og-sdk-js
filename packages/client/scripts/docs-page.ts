@@ -5,11 +5,11 @@
  * `bun run docs:page` writes it to `docs-preview/index.html`.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { google } from "../src/google.ts";
-import { here } from "../src/here.ts";
+import { google } from "../src/providers/google/index.ts";
+import { here } from "../src/providers/here/index.ts";
 import { createClient } from "../src/index.ts";
-import { mapbox } from "../src/mapbox.ts";
-import { precisely } from "../src/precisely.ts";
+import { mapbox } from "../src/providers/mapbox/index.ts";
+import { precisely } from "../src/providers/precisely/index.ts";
 
 /** A method's endpoint, and whether og serves it. Every og method is served by og. */
 type Row = [endpoint: string, onOg?: false];

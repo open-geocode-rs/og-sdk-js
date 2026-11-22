@@ -21,14 +21,14 @@ import {
   createBase,
   type Position,
   type Step,
-} from "./base.ts";
-import { type APIPromise, type CacheRule, type Call, type RequestOptions } from "./core.ts";
+} from "../../base.ts";
+import { type APIPromise, type CacheRule, type Call, type RequestOptions } from "../../core.ts";
 import {
   APIConnectionTimeoutError,
   APIUserAbortError,
   type GeocoderErrorCode,
   OgError,
-} from "./errors.ts";
+} from "../../errors.ts";
 import type {
   AutocompleteParams,
   AutocompleteResponse,
@@ -62,9 +62,9 @@ import type {
   UploadUrlResponse,
   VerifyParams,
   VerifyResponse,
-} from "./precisely.types.ts";
+} from "./types.ts";
 
-export type * from "./precisely.types.ts";
+export type * from "./types.ts";
 
 /** The host of the token call and the bulk calls, and of the real-time calls unless a region is chosen. */
 const HOST = "https://api.cloud.precisely.com";

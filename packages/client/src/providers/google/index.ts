@@ -22,9 +22,9 @@ import {
   createBase,
   type Position,
   type Step,
-} from "./base.ts";
-import type { APIPromise, RequestOptions } from "./core.ts";
-import { GeocoderError, type GeocoderErrorCode, type OgError } from "./errors.ts";
+} from "../../base.ts";
+import type { APIPromise, RequestOptions } from "../../core.ts";
+import { GeocoderError, type GeocoderErrorCode, type OgError } from "../../errors.ts";
 import type {
   AutocompleteParams,
   AutocompleteResponse,
@@ -46,9 +46,9 @@ import type {
   SearchNearbyResponse,
   SearchTextParams,
   SearchTextResponse,
-} from "./google.types.ts";
+} from "./types.ts";
 
-export type * from "./google.types.ts";
+export type * from "./types.ts";
 
 /** Options for {@link google}. Give `baseUrl` or `apiKey`. */
 export interface GoogleOptions extends CommonOptions {

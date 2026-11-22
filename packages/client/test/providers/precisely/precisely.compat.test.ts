@@ -1,8 +1,13 @@
 /// <reference types="node" />
 import { describe, expect, it } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import { BadRequestError, GeocoderError, OgError } from "../src/errors.ts";
-import { type ErrorResponse, jobIdOf, precisely, type Result } from "../src/precisely.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
+import { BadRequestError, GeocoderError, OgError } from "../../../src/errors.ts";
+import {
+  type ErrorResponse,
+  jobIdOf,
+  precisely,
+  type Result,
+} from "../../../src/providers/precisely/index.ts";
 
 const OG_URL = process.env["OG_URL"];
 

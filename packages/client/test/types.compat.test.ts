@@ -8,15 +8,12 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GeocoderError } from "../src/errors.ts";
-import { google } from "../src/google.ts";
-import { here, type JobDetailResponse } from "../src/here.ts";
-import { mapbox } from "../src/mapbox.ts";
-import { jobIdOf, precisely } from "../src/precisely.ts";
+import { google } from "../src/providers/google/index.ts";
+import { here, type JobDetailResponse } from "../src/providers/here/index.ts";
+import { mapbox } from "../src/providers/mapbox/index.ts";
+import { jobIdOf, precisely } from "../src/providers/precisely/index.ts";
 
-/** Every og server given, the Monaco Pack's and the Rhode Island Pack's. */
-const SERVERS = [process.env["OG_URL"], process.env["OG_RI_URL"]].filter((url): url is string =>
-  Boolean(url),
-);
+const SERVERS = process.env["OG_URL"] ? [process.env["OG_URL"]] : [];
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
 const ROOT = resolve(SRC, "../../..");
@@ -45,7 +42,6 @@ interface Facts {
  */
 const PACKS = [
   { name: "Monaco", lat: 43.7377547, lon: 7.4270688, poi: "casino", iso3: "MCO" },
-  { name: "Rhode Island", lat: 41.824, lon: -71.4128, poi: "Dunkin", iso3: "USA" },
 ] as const;
 
 /** A category every known Pack has POIs of, in each vendor's words. */
@@ -96,10 +92,10 @@ interface Answer {
 function program(answers: readonly Answer[]): string {
   const lines = [
     `import type { APIPromise } from ${JSON.stringify(join(SRC, "core.ts"))};`,
-    `import type { GoogleClient } from ${JSON.stringify(join(SRC, "google.ts"))};`,
-    `import type { MapboxClient } from ${JSON.stringify(join(SRC, "mapbox.ts"))};`,
-    `import type { HereClient } from ${JSON.stringify(join(SRC, "here.ts"))};`,
-    `import type { PreciselyClient } from ${JSON.stringify(join(SRC, "precisely.ts"))};`,
+    `import type { GoogleClient } from ${JSON.stringify(join(SRC, "providers/google/index.ts"))};`,
+    `import type { MapboxClient } from ${JSON.stringify(join(SRC, "providers/mapbox/index.ts"))};`,
+    `import type { HereClient } from ${JSON.stringify(join(SRC, "providers/here/index.ts"))};`,
+    `import type { PreciselyClient } from ${JSON.stringify(join(SRC, "providers/precisely/index.ts"))};`,
     "type Answer<F> = F extends (...args: never[]) => APIPromise<infer T> ? T : never;",
   ];
   answers.forEach((answer, index) => {

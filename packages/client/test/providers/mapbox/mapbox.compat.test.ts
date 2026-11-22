@@ -1,8 +1,8 @@
 /// <reference types="node" />
 import { describe, expect, it } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import { GeocoderError, NotFoundError } from "../src/errors.ts";
-import { mapbox } from "../src/mapbox.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
+import { GeocoderError, NotFoundError } from "../../../src/errors.ts";
+import { mapbox } from "../../../src/providers/mapbox/index.ts";
 
 const OG_URL = process.env["OG_URL"];
 

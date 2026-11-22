@@ -13,9 +13,9 @@
  * const { features } = await client.geocoding.forward({ q: "2 Avenue de Monte-Carlo" });
  * ```
  */
-import { type CacheRule, type APIPromise, type RequestOptions } from "./core.ts";
-import { type ClientInfo, type CommonOptions, createBase, type Position } from "./base.ts";
-import type { GeocoderErrorCode, OgError } from "./errors.ts";
+import { type CacheRule, type APIPromise, type RequestOptions } from "../../core.ts";
+import { type ClientInfo, type CommonOptions, createBase, type Position } from "../../base.ts";
+import { GeocoderError, type GeocoderErrorCode, type OgError } from "../../errors.ts";
 import type {
   GeocodingBatchParams,
   GeocodingBatchResponse,
@@ -31,9 +31,9 @@ import type {
   SearchBoxReverseParams,
   SearchBoxSuggestParams,
   SearchBoxSuggestResponse,
-} from "./mapbox.types.ts";
+} from "./types.ts";
 
-export type * from "./mapbox.types.ts";
+export type * from "./types.ts";
 
 /** Options for {@link mapbox}. Give `baseUrl` to ask an og server, or `accessToken` to ask Mapbox itself. */
 export interface MapboxOptions extends CommonOptions {
@@ -139,6 +139,17 @@ function featuresOf(data: unknown): Located[] {
 
 const present = (point: Position | undefined): point is Position => point !== undefined;
 
+function requireGeoJson(query: { format?: unknown }, server: ClientInfo["server"]): void {
+  if (query.format !== undefined && query.format !== "geojson")
+    throw new GeocoderError(
+      "Mapbox geocoding supports the geojson response format in this client.",
+      {
+        code: "unsupported",
+        provider: server,
+      },
+    );
+}
+
 function positions(method: string, data: unknown): Position[] {
   switch (method) {
     case "geocoding.forward":
@@ -199,7 +210,10 @@ export function mapbox(options: MapboxOptions): MapboxClient {
           args: [params],
           options: request,
           cache: kept(params),
-          send: (o) => get("/search/geocode/v6/forward", params, o),
+          send: (o) => {
+            requireGeoJson(params, base.server);
+            return get("/search/geocode/v6/forward", params, o);
+          },
         }),
       reverse: (params, request) =>
         base.call({
@@ -215,8 +229,11 @@ export function mapbox(options: MapboxOptions): MapboxClient {
           args: [params],
           options: request,
           cache: kept(params),
-          send: (o) =>
-            base.http({
+          send: (o) => {
+            for (const query of params.queries) {
+              if ("format" in query) requireGeoJson(query, base.server);
+            }
+            return base.http({
               method: "POST",
               path: "/search/geocode/v6/batch",
               query: { permanent: params.permanent, ...key },
@@ -225,7 +242,8 @@ export function mapbox(options: MapboxOptions): MapboxClient {
               // A batch only reads, so a retry repeats it safely.
               idempotent: true,
               options: o,
-            }),
+            });
+          },
         }),
     },
     searchbox: {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { google } from "../../client/src/google.ts";
-import { here } from "../../client/src/here.ts";
+import { google } from "../../client/src/providers/google/index.ts";
+import { here } from "../../client/src/providers/here/index.ts";
 import { createClient } from "../../client/src/index.ts";
-import { mapbox } from "../../client/src/mapbox.ts";
-import { precisely } from "../../client/src/precisely.ts";
+import { mapbox } from "../../client/src/providers/mapbox/index.ts";
+import { precisely } from "../../client/src/providers/precisely/index.ts";
 import { bodyOf, fakeFetch, headersOf, urlOf } from "../../client/test/helpers.ts";
 import { googleSource, hereSource, mapboxSource, ogSource, preciselySource } from "../src/index.ts";
 

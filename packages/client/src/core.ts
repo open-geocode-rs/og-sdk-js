@@ -262,7 +262,7 @@ export class Transport {
       // A retry never starts after the caller has given up.
       if (caller?.aborted) throw callerEnded(caller, provider);
       const watched = watch(caller, timeout, provider);
-      this.log("debug", `${call.method} ${url}`, attempt > 0 ? { attempt } : "");
+      this.log("debug", `${call.method} request`, { attempt: attempt + 1 });
       let response: Response;
       try {
         response = await this.#options.fetch(url, {
@@ -324,7 +324,7 @@ export class Transport {
       });
       this.log(
         response.status >= 500 ? "error" : "warn",
-        `${call.method} ${call.path}: ${error.message}`,
+        `${call.method} request failed (HTTP ${response.status}).`,
       );
       throw error;
     }

@@ -1,9 +1,13 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
-import { describe, expect, expectTypeOf, it } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import type { APIPromise } from "../src/core.ts";
-import { AuthenticationError, GeocoderError, UnprocessableEntityError } from "../src/errors.ts";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { Plugin, Position } from "../../../src/base.ts";
+import type { APIPromise } from "../../../src/core.ts";
+import {
+  AuthenticationError,
+  GeocoderError,
+  UnprocessableEntityError,
+} from "../../../src/errors.ts";
 import {
   type GeocodingBatchResponse,
   type GeocodingResponse,
@@ -12,13 +16,13 @@ import {
   type SearchBoxListCategoriesResponse,
   type SearchBoxResponse,
   type SearchBoxSuggestResponse,
-} from "../src/mapbox.ts";
-import { bodyOf, type Fetch, fakeFetch, headersOf, urlOf } from "./helpers.ts";
+} from "../../../src/providers/mapbox/index.ts";
+import { bodyOf, type Fetch, fakeFetch, headersOf, urlOf } from "../../helpers.ts";
 
 /** A synthetic response in the shape Mapbox documents. */
 function fixture(name: string): unknown {
   return JSON.parse(
-    readFileSync(new URL(`./fixtures/mapbox/${name}.json`, import.meta.url), "utf8"),
+    readFileSync(new URL(`../../fixtures/mapbox/${name}.json`, import.meta.url), "utf8"),
   );
 }
 
@@ -304,6 +308,30 @@ const CASES: Case[] = [
 ];
 
 describe("mapbox", () => {
+  it("keeps credentials and addresses out of debug and error logs", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const fetch = fakeFetch({ status: 400, body: { message: "sample-query sample-token" } });
+    const client = mapbox({ accessToken: "sample-token", fetch, logger, logLevel: "debug" });
+    await expect(client.geocoding.forward({ q: "sample-query" })).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(logger.debug).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalled();
+    for (const sink of [logger.debug, logger.warn]) {
+      expect(JSON.stringify(sink.mock.calls)).not.toMatch(/sample-query|sample-token|access_token/);
+    }
+  });
+
+  it("rejects v5 output before issuing a typed geocoding request", async () => {
+    const fetch = fakeFetch({ body: { features: [] } });
+    const client = mapbox({ baseUrl: OG, fetch });
+    await expect(
+      // @ts-expect-error v5 output does not have the typed v6 response shape
+      client.geocoding.forward({ q: "sample-query", format: "v5" }),
+    ).rejects.toMatchObject({ code: "unsupported" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("needs an og server or an access token", () => {
     let thrown: unknown;
     try {

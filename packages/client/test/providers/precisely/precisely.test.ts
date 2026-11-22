@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import type { APIPromise } from "../src/core.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
+import type { APIPromise } from "../../../src/core.ts";
 import {
   AuthenticationError,
   BadRequestError,
   GeocoderError,
   type GeocoderErrorCode,
   OgError,
-} from "../src/errors.ts";
+} from "../../../src/errors.ts";
 import {
   jobIdOf,
   precisely,
@@ -15,34 +15,34 @@ import {
   type PreciselyOgOptions,
   type PreciselyVendorClient,
   type PreciselyVendorOptions,
-} from "../src/precisely.ts";
-import autocompleteFixture from "./fixtures/precisely/autocomplete-200.json" with { type: "json" };
-import submitFixture from "./fixtures/precisely/bulk-submit-202.json" with { type: "json" };
-import cancelFixture from "./fixtures/precisely/cancel-200.json" with { type: "json" };
-import cancelErrorFixture from "./fixtures/precisely/cancel-400.json" with { type: "json" };
-import deleteFileFixture from "./fixtures/precisely/delete-file-200.json" with { type: "json" };
-import explainFixture from "./fixtures/precisely/explain-200.json" with { type: "json" };
-import badRequestFixture from "./fixtures/precisely/error-400.json" with { type: "json" };
-import unauthorizedFixture from "./fixtures/precisely/error-401.json" with { type: "json" };
-import forbiddenFixture from "./fixtures/precisely/error-403.json" with { type: "json" };
-import tooLargeFixture from "./fixtures/precisely/error-413.json" with { type: "json" };
-import rateLimitFixture from "./fixtures/precisely/error-429.json" with { type: "json" };
-import internalFixture from "./fixtures/precisely/error-500.json" with { type: "json" };
-import unavailableFixture from "./fixtures/precisely/error-503.json" with { type: "json" };
-import filesFixture from "./fixtures/precisely/files-200.json" with { type: "json" };
-import geocodeFixture from "./fixtures/precisely/geocode-200.json" with { type: "json" };
-import partialFixture from "./fixtures/precisely/geocode-206.json" with { type: "json" };
-import jobStatusFixture from "./fixtures/precisely/job-status-200.json" with { type: "json" };
-import jobsFixture from "./fixtures/precisely/jobs-200.json" with { type: "json" };
-import lookupFixture from "./fixtures/precisely/lookup-200.json" with { type: "json" };
-import postalCityFixture from "./fixtures/precisely/postal-city-200.json" with { type: "json" };
-import proximityFixture from "./fixtures/precisely/proximity-200.json" with { type: "json" };
-import reverseFixture from "./fixtures/precisely/reverse-200.json" with { type: "json" };
-import tokenFixture from "./fixtures/precisely/token-200.json" with { type: "json" };
-import tokenErrorFixture from "./fixtures/precisely/token-400.json" with { type: "json" };
-import uploadUrlFixture from "./fixtures/precisely/upload-url-200.json" with { type: "json" };
-import verifyFixture from "./fixtures/precisely/verify-200.json" with { type: "json" };
-import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply } from "./helpers.ts";
+} from "../../../src/providers/precisely/index.ts";
+import autocompleteFixture from "../../fixtures/precisely/autocomplete-200.json" with { type: "json" };
+import submitFixture from "../../fixtures/precisely/bulk-submit-202.json" with { type: "json" };
+import cancelFixture from "../../fixtures/precisely/cancel-200.json" with { type: "json" };
+import cancelErrorFixture from "../../fixtures/precisely/cancel-400.json" with { type: "json" };
+import deleteFileFixture from "../../fixtures/precisely/delete-file-200.json" with { type: "json" };
+import explainFixture from "../../fixtures/precisely/explain-200.json" with { type: "json" };
+import badRequestFixture from "../../fixtures/precisely/error-400.json" with { type: "json" };
+import unauthorizedFixture from "../../fixtures/precisely/error-401.json" with { type: "json" };
+import forbiddenFixture from "../../fixtures/precisely/error-403.json" with { type: "json" };
+import tooLargeFixture from "../../fixtures/precisely/error-413.json" with { type: "json" };
+import rateLimitFixture from "../../fixtures/precisely/error-429.json" with { type: "json" };
+import internalFixture from "../../fixtures/precisely/error-500.json" with { type: "json" };
+import unavailableFixture from "../../fixtures/precisely/error-503.json" with { type: "json" };
+import filesFixture from "../../fixtures/precisely/files-200.json" with { type: "json" };
+import geocodeFixture from "../../fixtures/precisely/geocode-200.json" with { type: "json" };
+import partialFixture from "../../fixtures/precisely/geocode-206.json" with { type: "json" };
+import jobStatusFixture from "../../fixtures/precisely/job-status-200.json" with { type: "json" };
+import jobsFixture from "../../fixtures/precisely/jobs-200.json" with { type: "json" };
+import lookupFixture from "../../fixtures/precisely/lookup-200.json" with { type: "json" };
+import postalCityFixture from "../../fixtures/precisely/postal-city-200.json" with { type: "json" };
+import proximityFixture from "../../fixtures/precisely/proximity-200.json" with { type: "json" };
+import reverseFixture from "../../fixtures/precisely/reverse-200.json" with { type: "json" };
+import tokenFixture from "../../fixtures/precisely/token-200.json" with { type: "json" };
+import tokenErrorFixture from "../../fixtures/precisely/token-400.json" with { type: "json" };
+import uploadUrlFixture from "../../fixtures/precisely/upload-url-200.json" with { type: "json" };
+import verifyFixture from "../../fixtures/precisely/verify-200.json" with { type: "json" };
+import { bodyOf, type Fetch, fakeFetch, headersOf, type Reply } from "../../helpers.ts";
 
 const HOST = "https://api.cloud.precisely.com";
 const OG = "https://og.example.com";

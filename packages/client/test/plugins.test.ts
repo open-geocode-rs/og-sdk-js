@@ -11,7 +11,7 @@ import {
   failover,
   memoryStore,
 } from "../src/plugins/index.ts";
-import { fakeFetch, type Fetch, type Reply, urlOf } from "./helpers.ts";
+import { fakeFetch, type Fetch, type Reply, headersOf, urlOf } from "./helpers.ts";
 
 interface Found {
   from: string;
@@ -175,6 +175,18 @@ describe("which server answers", () => {
 });
 
 describe("cache", () => {
+  it("isolates clients sharing a cache and bypasses per-request headers", async () => {
+    const shared = cache({ store: memoryStore() });
+    const a = mini("og", { baseUrl: "http://one.test", plugins: [shared] });
+    const b = mini("og", { baseUrl: "http://two.test", plugins: [shared] });
+    expect((await a.find({ q: "x" })).from).toBe("http://one.test");
+    expect((await b.find({ q: "x" })).from).toBe("http://two.test");
+    await b.find({ q: "x" });
+    expect(b.fetch).toHaveBeenCalledTimes(1);
+    await b.find({ q: "x" }, { headers: { authorization: "request-token" } });
+    expect(b.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("answers a repeated call from memory, with a copy for each caller", async () => {
     const lookups: boolean[] = [];
     const client = mini("og", {
@@ -304,6 +316,26 @@ describe("cache", () => {
 });
 
 describe("failover", () => {
+  it("replays with the backup's credentials", async () => {
+    const backupFetch = fakeFetch({ body: { features: [] } });
+    const backup = createClient({
+      baseUrl: "http://backup.test",
+      fetch: backupFetch,
+      headers: { authorization: "backup-token" },
+    });
+    const primaryFetch = fakeFetch({ status: 503 });
+    const primary = createClient({
+      baseUrl: "http://primary.test",
+      fetch: primaryFetch,
+      plugins: [failover({ to: backup })],
+      maxRetries: 0,
+      logLevel: "off",
+    });
+    await primary.geocode({ q: "x" }, { headers: { authorization: "primary-token" } });
+    expect(headersOf(primaryFetch)["authorization"]).toBe("primary-token");
+    expect(headersOf(backupFetch)["authorization"]).toBe("backup-token");
+  });
+
   it("moves to the next client of the same API when the first fails", async () => {
     const moves: string[] = [];
     const og = mini("google", { baseUrl: "http://og.test" });

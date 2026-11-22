@@ -1,20 +1,20 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import type { Plugin, Position } from "../src/base.ts";
-import type { Outcome } from "../src/core.ts";
+import type { Plugin, Position } from "../../../src/base.ts";
+import type { Outcome } from "../../../src/core.ts";
 import {
   AuthenticationError,
   BadRequestError,
   GeocoderError,
   InternalServerError,
   NotFoundError,
-} from "../src/errors.ts";
-import { here, type HereClient } from "../src/here.ts";
-import { fakeFetch, type Fetch, headersOf, type Reply, urlOf } from "./helpers.ts";
+} from "../../../src/errors.ts";
+import { here, type HereClient } from "../../../src/providers/here/index.ts";
+import { fakeFetch, type Fetch, headersOf, type Reply, urlOf } from "../../helpers.ts";
 
 const read = (name: string): string =>
-  readFileSync(new URL(`./fixtures/here/${name}`, import.meta.url), "utf8");
+  readFileSync(new URL(`../../fixtures/here/${name}`, import.meta.url), "utf8");
 const fixture = (name: string): unknown => JSON.parse(read(name));
 
 const OG = "https://og.test";

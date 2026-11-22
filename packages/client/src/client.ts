@@ -88,18 +88,25 @@ export type WithExtras<C extends { features: { properties: unknown }[] }, I exte
 /** A batch answer whose results hold the collection `R`. */
 export type BatchOf<B extends { results: { response?: unknown }[] }, R> = Omit<B, "results"> & {
   results: (Omit<B["results"][number], "response"> & { response?: R })[];
-};
+} & RequestIdField;
+
+/** The request ID on a native response, also available through `withResponse()`. */
+export interface RequestIdField {
+  readonly _request_id?: string | undefined;
+}
 
 /** Forward results, from `/geocode`, `/autocomplete` and `/places`, with the extras `I`. */
 export type ForwardCollection<I extends Include = never> = WithExtras<
   components["schemas"]["ForwardCollection"],
   I
->;
+> &
+  RequestIdField;
 /** Reverse results, from `/reverse`, with the extras `I`. */
 export type ReverseCollection<I extends Include = never> = WithExtras<
   components["schemas"]["ReverseCollection"],
   I
->;
+> &
+  RequestIdField;
 /** The answer to a forward batch, one result per item in input order. */
 export type ForwardBatch<I extends Include = never> = BatchOf<
   components["schemas"]["ForwardBatch"],
@@ -111,7 +118,7 @@ export type ReverseBatch<I extends Include = never> = BatchOf<
   ReverseCollection<I>
 >;
 /** A batch job's status. */
-export type JobStatus = components["schemas"]["JobStatus"];
+export type JobStatus = components["schemas"]["JobStatus"] & RequestIdField;
 /** Where a job is, one of `running`, `completed`, `cancelled` and `failed`. */
 export type JobState = components["schemas"]["JobState"];
 

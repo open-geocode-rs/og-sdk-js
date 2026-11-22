@@ -1,4 +1,4 @@
-import type { Plugin, PluginCall } from "../base.ts";
+import type { ClientInfo, Plugin, PluginCall } from "../base.ts";
 import type { CacheRule, Outcome, Shape } from "../core.ts";
 
 /** What the cache did to stay inside the rule of the server that answered. */
@@ -38,7 +38,7 @@ export interface CacheOptions {
   max?: number | undefined;
   /** The methods to cache, by name, such as `geocode` or `geocoding.forward`. Default every lookup. */
   methods?: readonly string[] | undefined;
-  /** A store of your own, in place of the built-in memory store. */
+  /** A store of your own, in place of the built-in memory store. Entries are scoped to a client instance. */
   store?: CacheStore | undefined;
   /** The key of a call. Return `undefined` to leave the call uncached. */
   key?: ((call: PluginCall) => string | undefined) | undefined;
@@ -114,6 +114,7 @@ export function cache(options: CacheOptions = {}): Plugin {
   const store = options.store ?? memoryStore(options.max);
   const methods = options.methods ? new Set(options.methods) : undefined;
   const keyOf = options.key ?? cacheKey;
+  const namespaces = new WeakMap<ClientInfo, string>();
   const warned = new Set<string>();
   const limit = (event: CacheLimitEvent): void => {
     if (options.onLimit) {
@@ -133,8 +134,15 @@ export function cache(options: CacheOptions = {}): Plugin {
     name: "cache",
     async handle(call, next) {
       if (methods && !methods.has(call.method)) return next();
-      const key = keyOf(call);
-      if (key === undefined) return next();
+      if (call.options?.headers && Object.keys(call.options.headers).length > 0) return next();
+      const requestKey = keyOf(call);
+      if (requestKey === undefined) return next();
+      let namespace = namespaces.get(call.client);
+      if (namespace === undefined) {
+        namespace = Array.from(crypto.getRandomValues(new Uint32Array(4))).join("-");
+        namespaces.set(call.client, namespace);
+      }
+      const key = `${namespace}:${requestKey}`;
       const hit = await store.get(key);
       options.onLookup?.({ key, hit: hit !== undefined, call });
       if (hit !== undefined)

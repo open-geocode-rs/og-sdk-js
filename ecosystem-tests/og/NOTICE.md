@@ -1,5 +1,8 @@
 # Notice
 
-`ri-addresses.geojson.gz` holds 1000 address points drawn from the OpenAddresses `us/ri/statewide` source.
-They come from the Rhode Island Geographic Information System (RIGIS) / RI E 9-1-1 and AK Associates, whose licence asks that both RIGIS and the primary producers be acknowledged in any derived product.
-The data is provided as is, with no warranty of any kind from its producers, the RIGIS consortium, the State of Rhode Island or the University of Rhode Island.
+The U.S. smoke test uses eight address records from OpenGeocode's National Address Database benchmark.
+The source is the U.S. Department of Transportation National Address Database, release 24.
+The fixed sample takes the first complete address and its messy counterpart for Alaska,
+California, North Carolina, New York, Oregon, Texas, Wisconsin, and West Virginia.
+
+[Sample source at the tested OpenGeocode revision](https://github.com/open-geocode-rs/open-geocode/blob/3eab4260cac7074cddc9a538957f7085863b70d9/fixtures/queries/nad.json)

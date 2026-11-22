@@ -22,6 +22,7 @@ export {
 } from "./base.ts";
 export {
   APIPromise,
+  retryDelay,
   type CacheRule,
   type Logger,
   type LogLevel,

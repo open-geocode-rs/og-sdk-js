@@ -1,51 +1,41 @@
 #!/bin/sh
-# Builds the two Packs the og-backed suites run on and serves og on each.
-#
-#   Monaco, for the vendor suites (OG_URL).
-#   Rhode Island, calibrated, for the company flows (OG_RI_URL). It has
-#   regions, US addresses and towns that share a word.
-#
-# The Rhode Island Pack is built from OSM alone, so the OpenAddresses rows
-# in ri-addresses.geojson.gz are held out from it and calibrate its scores.
-#
-# Usage: ecosystem-tests/og/serve.sh OG_BINARY WORK_DIR MONACO_PORT RI_PORT
-# Prints the two URLs to export once both answer.
 set -eu
 
+if [ "$#" -ne 4 ]; then
+  echo "Usage: $0 OG_BINARY MONACO_PACK USA_PACK WORK_DIR" >&2
+  exit 2
+fi
+
 og=$1
-work=$2
-monaco_port=$3
-ri_port=$4
-here=$(cd "$(dirname "$0")" && pwd)
-
+monaco=$2
+usa=$3
+work=$4
 mkdir -p "$work"
-fetch() {
-	[ -s "$work/$1.osm.pbf" ] || curl -sfL --retry 5 -o "$work/$1.osm.pbf" "$2"
-}
-fetch monaco https://download.geofabrik.de/europe/monaco-latest.osm.pbf
-fetch ri https://download.geofabrik.de/north-america/us/rhode-island/rhode-island-latest.osm.pbf
-
-"$og" pack build --input "$work/monaco.osm.pbf" --pack "$work/monaco" --fresh >"$work/build-monaco.log" 2>&1
-"$og" pack build --input "$work/ri.osm.pbf" --pack "$work/ri" --fresh >"$work/build-ri.log" 2>&1
-"$og" geocode calibrate --pack "$work/ri" --addresses "ri=$here/ri-addresses.geojson.gz" --rows 1000 \
-	>"$work/calibrate-ri.json" 2>"$work/calibrate-ri.log"
 
 serve() {
-	mkdir -p "$work/jobs-$1"
-	"$og" serve --pack "$work/$1" --bind "127.0.0.1:$2" --job-dir "$work/jobs-$1" \
-		--hook-host 127.0.0.1 >"$work/serve-$1.log" 2>&1 &
-	tries=0
-	until curl -sf "http://127.0.0.1:$2/geocode?q=a" >/dev/null; do
-		tries=$((tries + 1))
-		[ "$tries" -lt 120 ] || {
-			cat "$work/serve-$1.log"
-			exit 1
-		}
-		sleep 1
-	done
+  name=$1
+  pack=$2
+  port=$3
+  "$og" serve --pack "$pack" --bind "127.0.0.1:$port" --job-dir "$work/jobs-$name" \
+    --hook-host 127.0.0.1 >"$work/$name.log" 2>&1 &
+  server_pid=$!
+  pids="$pids $server_pid"
+  tries=0
+  until kill -0 "$server_pid" 2>/dev/null && curl -sf "http://127.0.0.1:$port/readyz" >/dev/null; do
+    tries=$((tries + 1))
+    if ! kill -0 "$server_pid" 2>/dev/null || [ "$tries" -ge 30 ]; then
+      cat "$work/$name.log" >&2
+      return 1
+    fi
+    sleep 1
+  done
 }
-serve monaco "$monaco_port"
-serve ri "$ri_port"
 
-echo "OG_URL=http://127.0.0.1:$monaco_port"
-echo "OG_RI_URL=http://127.0.0.1:$ri_port"
+pids=""
+trap 'for server_pid in $pids; do kill "$server_pid" 2>/dev/null || true; done' EXIT
+export OG_URL="http://127.0.0.1:${OG_MONACO_PORT:-18900}"
+export OG_USA_URL="http://127.0.0.1:${OG_USA_PORT:-18901}"
+export OG_TEST_ADDRESS="12 Boulevard des Moulins Monaco"
+serve monaco "$monaco" "${OG_MONACO_PORT:-18900}"
+serve usa "$usa" "${OG_USA_PORT:-18901}"
+bun run test

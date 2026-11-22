@@ -9,9 +9,9 @@
  * const { items } = await client.geocode({ q: "Invalidenstraße 116 Berlin" });
  * ```
  */
-import { type ClientInfo, type CommonOptions, createBase, type Position } from "./base.ts";
-import type { APIPromise, CacheRule, RequestOptions } from "./core.ts";
-import type { GeocoderErrorCode, OgError } from "./errors.ts";
+import { type ClientInfo, type CommonOptions, createBase, type Position } from "../../base.ts";
+import type { APIPromise, CacheRule, RequestOptions } from "../../core.ts";
+import type { GeocoderErrorCode, OgError } from "../../errors.ts";
 import type {
   AutocompleteParams,
   AutosuggestParams,
@@ -46,9 +46,9 @@ import type {
   RevgeocodeParams,
   SignalsParams,
   VersionResponse,
-} from "./here.types.ts";
+} from "./types.ts";
 
-export type * from "./here.types.ts";
+export type * from "./types.ts";
 
 /** Options for {@link here}. Give `baseUrl`, or one of `apiKey` and `bearerToken`. */
 export interface HereOptions extends CommonOptions {

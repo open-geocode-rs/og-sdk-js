@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { describe, expect, it } from "vitest";
-import { google } from "../src/google.ts";
+import { google } from "../../../src/providers/google/index.ts";
 
 const OG_URL = process.env["OG_URL"];
 
