@@ -1327,12 +1327,12 @@ export interface operations {
                  */
                 q?: string;
                 /**
-                 * @description With `q`: point to prefer results near, as `lon,lat`. Breaks ties between equally good matches only.
+                 * @description Point to prefer results near, as `lon,lat`. Breaks ties between equally good matches only.
                  * @example -79.38,43.65
                  */
                 focus?: string;
                 /**
-                 * @description With `q`: return only results inside this box, as `min_lon,min_lat,max_lon,max_lat`. The box cannot cross the antimeridian.
+                 * @description Return only results inside this box, as `min_lon,min_lat,max_lon,max_lat`. The box cannot cross the antimeridian.
                  * @example -79.64,43.58,-79.12,43.86
                  */
                 bbox?: string;
