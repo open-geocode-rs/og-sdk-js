@@ -394,7 +394,7 @@ const CASES: Case[] = [
       billingTags: "teamA,teamB",
       inputDelimiter: "|",
       outputDelimiter: "\\t",
-      outputColumns: "recId,position,addressLabel",
+      outputColumns: "recId\tposition\taddressLabel",
       startJob: "false",
       outputType: "csv",
       notificationIds: NOTIFICATION,
@@ -641,6 +641,45 @@ describe.each(TARGETS)("here client asking $target", ({ make, origin, prefix, ke
       ["GET", `${prefix}/v7/batch/notifications/${NOTIFICATION}/test`],
     ]);
     expect(urlOf(fetch).origin).toBe(origin("batch"));
+  });
+
+  it("sends signals as form lines with version 1, and never retries them", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 503 })) as Fetch;
+    const client = make(fetch);
+    const failed = await client
+      .signals({
+        body: [
+          {
+            action: "here:gs:action:navigate-to",
+            correlationId: "c-1",
+            resourceId: "here:pds:place:a b",
+            rank: 2,
+            timestamp: 1692625661000,
+          },
+          { action: "here:gs:action:view", correlationId: "c-2", resourceId: "r-2", rank: 0 },
+        ],
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(failed).toBeInstanceOf(GeocoderError);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const url = urlOf(fetch);
+    expect(url.origin).toBe(origin("signals"));
+    expect(url.pathname).toBe(`${prefix}/v1/signals`);
+    expect(Object.fromEntries(url.searchParams)).toEqual(key);
+    const init = fetch.mock.calls[0]![1]!;
+    expect(init.method).toBe("POST");
+    expect(headersOf(fetch)["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(init.body).toBe(
+      "version=1&action=here:gs:action:navigate-to&correlationId=c-1&resourceId=here:pds:place:a%20b&rank=2&timestamp=1692625661000\n" +
+        "version=1&action=here:gs:action:view&correlationId=c-2&resourceId=r-2&rank=0",
+    );
+
+    const sent = noContent();
+    await expect(make(sent).signals({ body: "version=1&rank=0" })).resolves.toBeUndefined();
+    expect(sent.mock.calls[0]![1]!.body).toBe("version=1&rank=0");
   });
 
   it("reads a job without results or errors as empty text", async () => {

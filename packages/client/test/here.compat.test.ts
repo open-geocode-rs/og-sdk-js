@@ -1,4 +1,6 @@
 /// <reference types="node" />
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import type { Plugin, Position } from "../src/base.ts";
 import { GeocoderError, NotFoundError } from "../src/errors.ts";
@@ -13,7 +15,10 @@ const OG_URL = process.env["OG_URL"];
 
 /** The address the Monaco test Pack is asked for, and the point it lies at. */
 const ADDRESS = "2 Avenue de Monte-Carlo";
-const TITLE = "2 Avenue de Monte-Carlo, Monaco, 98000, MC";
+/** HERE's label of the fixture house, its postal lines joined. */
+const TITLE = "2 Avenue de Monte-Carlo, 98000 Monaco, Monaco";
+/** HERE's autocomplete title of the house, from the country down. */
+const SUGGESTED_TITLE = "Monaco, 98000, 2 Avenue de Monte-Carlo";
 const POINT = { lat: 43.7377547, lng: 7.4270688 };
 const AT = `${POINT.lat},${POINT.lng}`;
 const CASINO = "Casino de Monte Carlo";
@@ -28,6 +33,24 @@ const failure = async (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
   );
   expect(thrown).toBeInstanceOf(GeocoderError);
   return thrown as GeocoderError;
+};
+
+/** A local endpoint og can call, which keeps the path and query of every call. */
+const hook = async (): Promise<{ url: string; calls: string[]; close: () => void }> => {
+  const calls: string[] = [];
+  const server = createServer((request, response) => {
+    calls.push(request.url ?? "");
+    response.writeHead(200).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, calls, close: () => server.close() };
+};
+
+const called = async (calls: string[], count: number): Promise<string[]> => {
+  for (let attempt = 0; attempt < 100 && calls.length < count; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  return calls;
 };
 
 // These run against a real og server, which answers HERE's API under /compat/here.
@@ -232,7 +255,10 @@ describe.runIf(OG_URL)("here against og", () => {
         expect(item).not.toHaveProperty("position");
       }
       const house = completed.items.find((item) => item.resultType === "houseNumber");
-      expect(house).toMatchObject({ title: TITLE, address: { houseNumber: "2" } });
+      expect(house).toMatchObject({
+        title: SUGGESTED_TITLE,
+        address: { label: TITLE, houseNumber: "2" },
+      });
 
       const address = await client.lookup({ id: house!.id });
       expect(address).toMatchObject({
@@ -267,12 +293,18 @@ describe.runIf(OG_URL)("here against og", () => {
       });
     });
 
-    it("answers a search sent as a POST with a route in its body", async () => {
-      const outcome = await client
-        .discover({ q: CASINO, at: AT, limit: 1, route: "BFoz5xJ67i1B1B7PzIhaxL7Y" })
-        .withResponse();
-      expect(outcome.response?.url).not.toContain("route");
-      expect(outcome.data.items).toHaveLength(1);
+    it("keeps only what lies along a route, and refuses a route that is none", async () => {
+      // A route in Frankfurt holds nothing of Monaco.
+      const { items } = await client.discover({
+        q: CASINO,
+        at: AT,
+        limit: 1,
+        route: "BFoz5xJ67i1B1B7PzIhaxL7Y",
+      });
+      expect(items).toEqual([]);
+      const error = await failure(client.discover({ q: CASINO, at: AT, limit: 1, route: "B" }));
+      expect(error).toMatchObject({ status: 400, operation: "discover" });
+      expect(error.body).toMatchObject({ title: "Illegal input for parameter 'route'" });
     });
   });
 
@@ -304,21 +336,6 @@ describe.runIf(OG_URL)("here against og", () => {
   });
 
   describe("what og does not serve", () => {
-    it("fails the notification calls and the OpenAPI document with code unsupported", async () => {
-      const calls = [
-        client.batch.notifications.list({ maxRetries: 0 }),
-        client.batch.notifications.create({ config: { url: "https://hooks.example.test/done" } }),
-        client.batch.notifications.get({ notificationId: "NOTIFICATION-1" }, { maxRetries: 0 }),
-        client.batch.notifications.test({ notificationId: "NOTIFICATION-1" }, { maxRetries: 0 }),
-        client.batch.openapi({ maxRetries: 0 }),
-      ];
-      for (const call of calls) {
-        const error = await failure(call);
-        expect(error).toMatchObject({ code: "unsupported", status: 501, provider: "og" });
-        expect(error.body).toMatchObject({ code: "E6005010", status: 501 });
-      }
-    });
-
     it("fails a job for the lookup service, which og does not wrap", async () => {
       const error = await failure(
         client.batch.create({
@@ -331,8 +348,104 @@ describe.runIf(OG_URL)("here against og", () => {
     });
   });
 
+  describe("signals", () => {
+    it("is not served by og, which learns nothing from a signal", async () => {
+      const error = await failure(
+        client.signals({
+          body: [
+            {
+              action: "here:gs:action:navigate-to",
+              correlationId: "c",
+              resourceId: "r",
+              rank: 0,
+              timestamp: Date.now(),
+            },
+          ],
+        }),
+      );
+      expect(error).toMatchObject({ code: "not_found", status: 404, operation: "signals" });
+    });
+  });
+
+  describe("batch notifications", () => {
+    it("keeps a notification, calls it on a test and when a job ends, then deletes it", async () => {
+      const endpoint = await hook();
+      try {
+        const url = `${endpoint.url}/done?id=\${JOB_ID}&status=\${JOB_STATUS}&ok=\${JOB_RECORDS_SUCCEEDED}`;
+        const created = await client.batch.notifications.create({
+          type: "webHook",
+          config: { url },
+        });
+        expect(created).toEqual({
+          id: expect.stringMatching(/^NOTIFICATION-/),
+          type: "webHook",
+          config: { url },
+        });
+        const notificationId = created.id;
+        await expect(client.batch.notifications.get({ notificationId })).resolves.toEqual(created);
+        const listed = await client.batch.notifications.list();
+        expect(Array.isArray(listed) ? listed : [listed]).toContainEqual(created);
+
+        await expect(client.batch.notifications.test({ notificationId })).resolves.toBeUndefined();
+        expect(await called(endpoint.calls, 1)).toEqual([
+          "/done?id=JOB-00000000-0000-0000-0000-000000000000&status=completed&ok=0",
+        ]);
+        const used = await client.batch.notifications.get({ notificationId });
+        expect(used.lastUsedTime).toEqual(expect.stringMatching(/Z$/));
+
+        const job = await client.batch.create({
+          body: `recId|q\nmonte|${ADDRESS}\n`,
+          serviceHrn: GEOCODE_HRN,
+          notificationIds: [notificationId],
+        });
+        const done = await ended(job.id);
+        expect(done).toMatchObject({ status: "completed", notificationIds: [notificationId] });
+        expect((await called(endpoint.calls, 2))[1]).toBe(
+          `/done?id=${job.id}&status=completed&ok=1`,
+        );
+
+        const replaced = await client.batch.notifications.update({
+          notificationId,
+          config: { url: `${endpoint.url}/v2` },
+        });
+        expect(replaced).toMatchObject({
+          id: notificationId,
+          config: { url: `${endpoint.url}/v2` },
+        });
+
+        await expect(
+          client.batch.notifications.delete({ notificationId }),
+        ).resolves.toBeUndefined();
+        const gone = await failure(
+          client.batch.notifications.get({ notificationId }, { maxRetries: 0 }),
+        );
+        expect(gone).toMatchObject({ code: "not_found", status: 404 });
+        expect(gone.body).toMatchObject({ code: "E6004044", title: "Notification not found" });
+      } finally {
+        endpoint.close();
+      }
+    });
+
+    it("refuses a job that names a notification og does not keep", async () => {
+      const error = await failure(
+        client.batch.create({
+          body: `q\n${ADDRESS}\n`,
+          serviceHrn: GEOCODE_HRN,
+          notificationIds: ["NOTIFICATION-3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+        }),
+      );
+      expect(error).toMatchObject({ code: "invalid_request", status: 400 });
+      expect(error.body).toMatchObject({ title: "Notification not found" });
+    });
+  });
+
   describe("batch", () => {
     const tag = `sdk-here-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    it("serves no OpenAPI document, which only HERE writes", async () => {
+      const error = await failure(client.batch.openapi());
+      expect(error).toMatchObject({ status: 404 });
+    });
 
     it("reports its version and its health", async () => {
       await expect(client.batch.version()).resolves.toMatchObject({
@@ -455,7 +568,7 @@ describe.runIf(OG_URL)("here against og", () => {
         tag,
       });
       expect(job.serviceHrn).toBe(REVGEOCODE_HRN);
-      expect(job.status).not.toBe("submitted");
+      expect(job.status).toBe("submitted");
 
       const done = await ended(job.id);
       expect(done).toMatchObject({ status: "completed", outputType: "csv" });
@@ -533,7 +646,9 @@ describe.runIf(OG_URL)("here against og", () => {
       expect(seen["geocode"]).toEqual([point]);
       expect(seen["revgeocode"]).toEqual([point]);
       expect(seen["multiRevgeocode"]).toEqual([point]);
-      expect(seen["autosuggest"]).toHaveLength(suggested.items.length);
+      // A search offered has no point of its own.
+      const placed = suggested.items.filter((item) => "position" in item);
+      expect(seen["autosuggest"]).toHaveLength(placed.length);
       expect(seen["discover"]).toHaveLength(found.items.length);
       expect(seen["lookup"]).toEqual([{ lat: 43.7391605, lon: 7.428023 }]);
       expect(seen["autocomplete"]).toEqual([]);

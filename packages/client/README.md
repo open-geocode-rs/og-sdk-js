@@ -155,19 +155,23 @@ const { places } = await client.places.searchText({
 const { results } = await client.geocode.address({ addressQuery: "10 King St W, Toronto" });
 ```
 
-| Method                | Google endpoint                    | On og |
-| --------------------- | ---------------------------------- | ----- |
-| `places.searchText`   | `POST /v1/places:searchText`       | yes   |
-| `places.autocomplete` | `POST /v1/places:autocomplete`     | yes   |
-| `places.get`          | `GET /v1/places/{placeId}`         | yes   |
-| `places.searchNearby` | `POST /v1/places:searchNearby`     | yes   |
-| `geocode.address`     | `GET /v4/geocode/address`          | yes   |
-| `geocode.location`    | `GET /v4/geocode/location`         | yes   |
-| `geocode.place`       | `GET /v4/geocode/places/{placeId}` | yes   |
+| Method                 | Google endpoint                                          | On og |
+| ---------------------- | -------------------------------------------------------- | ----- |
+| `places.searchText`    | `POST /v1/places:searchText`                             | yes   |
+| `places.autocomplete`  | `POST /v1/places:autocomplete`                           | yes   |
+| `places.get`           | `GET /v1/places/{placeId}`                               | yes   |
+| `places.searchNearby`  | `POST /v1/places:searchNearby`                           | yes   |
+| `places.getPhotoMedia` | `GET /v1/places/{placeId}/photos/{photoReference}/media` | no    |
+| `geocode.address`      | `GET /v4/geocode/address`                                | yes   |
+| `geocode.location`     | `GET /v4/geocode/location`                               | yes   |
+| `geocode.place`        | `GET /v4/geocode/places/{placeId}`                       | yes   |
+| `geocode.destinations` | `POST /v4/geocode/destinations`                          | yes   |
 
 The field mask is the typed `fieldMask` parameter, sent as `X-Goog-FieldMask`.
 On og, `places.searchNearby` answers nearest first under either `rankPreference`.
 A type og has no category for finds no place.
+og holds no photos, so on og `places.getPhotoMedia` answers Google's own error for a photo the place does not have.
+On og, `geocode.destinations` states a destination's place and the entrances OpenStreetMap maps for it, the main one `PREFERRED`.
 
 ### Mapbox
 
@@ -209,21 +213,30 @@ const { items } = await client.geocode({ q: "10 King St W, Toronto" });
 const near = await client.revgeocode({ at: "43.6489,-79.3789" });
 ```
 
-| Method                                                                                         | HERE endpoint               | On og         |
-| ---------------------------------------------------------------------------------------------- | --------------------------- | ------------- |
-| `geocode`                                                                                      | `GET /v1/geocode`           | yes           |
-| `revgeocode`                                                                                   | `GET /v1/revgeocode`        | yes           |
-| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode` | yes           |
-| `autosuggest`                                                                                  | `GET /v1/autosuggest`       | yes           |
-| `autocomplete`                                                                                 | `GET /v1/autocomplete`      | yes           |
-| `discover`                                                                                     | `GET /v1/discover`          | yes           |
-| `lookup`                                                                                       | `GET /v1/lookup`            | yes           |
-| `browse`                                                                                       | `GET /v1/browse`            | yes           |
-| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`            | yes           |
-| `batch.notifications.*`                                                                        | `/v7/batch/notifications`   | `unsupported` |
+| Method                                                                                         | HERE endpoint               | On og   |
+| ---------------------------------------------------------------------------------------------- | --------------------------- | ------- |
+| `geocode`                                                                                      | `GET /v1/geocode`           | yes     |
+| `revgeocode`                                                                                   | `GET /v1/revgeocode`        | yes     |
+| `multiRevgeocode`                                                                              | `POST /v1/multi-revgeocode` | yes     |
+| `autosuggest`                                                                                  | `GET /v1/autosuggest`       | yes     |
+| `autocomplete`                                                                                 | `GET /v1/autocomplete`      | yes     |
+| `discover`                                                                                     | `GET /v1/discover`          | yes     |
+| `lookup`                                                                                       | `GET /v1/lookup`            | yes     |
+| `browse`                                                                                       | `GET /v1/browse`            | yes     |
+| `signals`                                                                                      | `POST /v1/signals`          | no      |
+| `batch.create`, `list`, `status`, `start`, `stop`, `results`, `errors`, `delete`, `deleteMany` | `/v7/batch/jobs`            | yes     |
+| `batch.notifications.*`                                                                        | `/v7/batch/notifications`   | in part |
+| `batch.version`, `health`                                                                      | `/v7/version`, `/v7/health` | yes     |
+| `batch.openapi`                                                                                | `/v7/openapi`               | no      |
 
 On og, `browse` filters by the HERE category ids og has a kind of place for, at any of their three levels.
-A chain or a food type asked for finds no place, since og holds neither.
+og holds no chain or food type, so `browse` with `chains` or `foodTypes` is refused with HERE's illegal input error.
+og cannot search along a route, so a search with `route` is refused the same way, and so is a page past the 50 results a search gives or the 20 a suggestion gives.
+og learns nothing from a signal and has no OpenAPI document of HERE's, so `signals` and `batch.openapi` answer HERE's not found error.
+A notification is kept by og and called with GET when a job that names it ends.
+og calls back only a host its operator allows with `serve --hook-host`, and refuses any other, so notifications work only where that is set.
+A result's `scoring.fieldScore` is 1 for a part og matched and 0.5 for one it matched in part, and `queryScore` is the mean over every part the query states, one not matched counting 0.
+A town whose name holds the one asked for in part, such as East Providence for Providence, still scores 0.875 beside three fully matched parts, so a caller that keeps results above 0.8 keeps it.
 
 ### Precisely
 
@@ -238,21 +251,29 @@ const { responses } = await client.geocode({
 });
 ```
 
-| Method                                            | Precisely endpoint                        | On og         |
-| ------------------------------------------------- | ----------------------------------------- | ------------- |
-| `geocode`                                         | `POST /v1/geocode`                        | yes           |
-| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes           |
-| `lookup`                                          | `POST /v1/lookup`                         | yes           |
-| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes           |
-| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes           |
-| `verify`                                          | `POST /v1/verify`                         | `unsupported` |
-| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes           |
-| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes           |
-| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes           |
-| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | `unsupported` |
+| Method                                            | Precisely endpoint                        | On og   |
+| ------------------------------------------------- | ----------------------------------------- | ------- |
+| `geocode`                                         | `POST /v1/geocode`                        | yes     |
+| `reverseGeocode`                                  | `POST /v1/reverse-geocode`                | yes     |
+| `lookup`                                          | `POST /v1/lookup`                         | yes     |
+| `autocomplete`                                    | `POST /v1/autocomplete`                   | yes     |
+| `expressAutocomplete`, `expressAutocompleteV2`    | `POST /v1` and `/v2/express-autocomplete` | yes     |
+| `verify`                                          | `POST /v1/verify`                         | yes     |
+| `autocompletePostalCity`                          | `POST /v1/autocomplete/postal-city`       | yes     |
+| `proximitySearch`                                 | `POST /v1/proximity-search`               | yes     |
+| `explainAddressCode`                              | `POST /v1/explain-addresscode`            | in part |
+| `bulk.uploadUrl`, `upload`, `files`, `deleteFile` | `/v2/files`                               | yes     |
+| `bulk.geocode`                                    | `POST /v2/bulk-geocode`                   | yes     |
+| `bulk.jobs`, `status`, `cancel`, `results`        | `/v2/bulk/jobs`                           | yes     |
+| `bulk.verify`                                     | `POST /v2/bulk-verify`                    | yes     |
+
+On og, `explainAddressCode` explains Global Match Codes, the code og's `verify` gives, and answers Precisely's error for the other code types.
+og starts a bulk job as soon as it is submitted, so a job is often done before `bulk.cancel` reaches it, and the cancel then answers Precisely's error for a job that can no longer be canceled.
 
 When it asks Precisely, the client fetches the Bearer token itself, keeps it until shortly before it expires, and fetches a fresh one when a call answers 401.
-When it asks og, no token call is made.
+When it asks og, no token call is made, and the client it returns has no `token` method.
+A `baseUrl` given beside `apiKey`, `apiSecret` and `region` asks og, and none of the three is sent.
+With `apiKey` and `apiSecret` and no `baseUrl` it also has `token()`, which hands the Bearer token to something else.
 
 ## What every client shares
 

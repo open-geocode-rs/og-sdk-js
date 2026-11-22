@@ -407,12 +407,6 @@ export interface components {
              */
             street_parts?: components["schemas"]["StreetParts"];
             unit?: string;
-            /**
-             * @description `unit`'s designator as written, such as `Apt` of `Apt 4`. Absent
-             *     when the unit starts with none.
-             * @example Apt
-             */
-            unit_type?: string;
         };
         /**
          * @description A data set an answer comes from and how its licence asks it to be
@@ -454,6 +448,14 @@ export interface components {
              * @example Q867662
              */
             wikidata?: string;
+        };
+        /** @description The building an address is drawn as, when its source maps it as one. */
+        Building: {
+            /**
+             * @description Its name, as its `name` tag writes it.
+             * @example Google Building 41
+             */
+            name?: string;
         };
         /** @description Properties shared by forward and reverse results. */
         Common: {
@@ -514,8 +516,22 @@ export interface components {
              *     Zanoli" is an Esso. Present only on places.
              */
             brand?: components["schemas"]["Brand"];
+            /**
+             * @description The building an address's source draws it as, and its name when it
+             *     has one. Absent on an address mapped as a point on no building, and
+             *     on every other result.
+             */
+            building?: components["schemas"]["Building"];
             /** @description POI category, such as `amenity:cafe`. Present only on POIs. */
             category?: string;
+            /**
+             * @description ISO code of a result that is an area: on a country its ISO 3166-1
+             *     alpha-2 code, on an area below it its ISO 3166-2 code, as
+             *     `context` gives them. Absent on any other result, and on an area
+             *     the source data gives no code.
+             * @example MC
+             */
+            code?: string;
             /**
              * @description How to reach a place: its phone number, website and email, each as
              *     its source writes it. og rewrites none and does not check that one
@@ -525,11 +541,25 @@ export interface components {
             /** @description Administrative areas containing the result. */
             context?: components["schemas"]["Context"];
             /**
+             * @description The kinds of food a place serves, as OpenStreetMap's `cuisine` tag
+             *     lists them, in lower case and in order. Absent on a result that
+             *     states none.
+             * @example [
+             *       "pizza",
+             *       "italian"
+             *     ]
+             */
+            cuisine?: string[];
+            /**
              * @description Stable ID from the source data, such as `osm:node:123`. Store it to
              *     find the record again: it outlives a Pack rebuild.
              */
             id: string;
-            /** @description One-line display label: `name` followed by its location. */
+            /**
+             * @description One-line display label: `name` followed by its location. With
+             *     `lang`, each part that names the result or one of its areas is that
+             *     name in the language asked, as `name` and `context` are.
+             */
             label: string;
             layer: components["schemas"]["Layer"];
             /**
@@ -550,6 +580,14 @@ export interface components {
              */
             road_class?: components["schemas"]["RoadClass"];
             source: components["schemas"]["Source"];
+            /**
+             * @description For an address that states no postcode, the one postcode the other
+             *     addresses of its street state, when they all state the same one. It
+             *     is where the address most likely lies, and `address.postcode` stays
+             *     what the source states. Absent on every other result.
+             * @example 94124
+             */
+            street_postcode?: string;
             /**
              * @description The IANA name of the timezone the result lies in, such as
              *     `Europe/Monaco`. Its offset from UTC is the reader's to compute,
@@ -677,7 +715,8 @@ export interface components {
              * Format: float
              * @description Probability, from 0 to 1, that this is the address the query asks
              *     for. Of results at 0.8, about 8 in 10 are correct. Present only when
-             *     the Pack is calibrated. `0` on a `fallback` result.
+             *     the Pack is calibrated and the query states a house number, the
+             *     queries calibration measures. `0` on a `fallback` result.
              */
             confidence?: number;
             /**
@@ -695,17 +734,18 @@ export interface components {
             /**
              * @description The parts of `label` the typed text matched, in order, none
              *     overlapping. Present on `/autocomplete` results, the only ones found
-             *     by text still being typed. Absent when no typed word can be placed
-             *     in the label, as on a place suggested for its category.
+             *     by text still being typed. A place suggested for the kind the text
+             *     names is marked where the typed words lie in its label too. Absent
+             *     when no typed word can be placed in the label.
              */
             highlights?: components["schemas"]["Highlight"][];
             /**
              * @description How each address part the query states matched the result. Present
-             *     on a `/geocode` result found by reading the query as an address,
-             *     when it states a part. Absent on a result found by its whole name,
-             *     and on `/places` and `/autocomplete`. A place is sought by its name
-             *     and a suggestion by what is typed so far, which no address reading
-             *     judges.
+             *     on a `/geocode` result when the query states a part. A place found
+             *     because the whole query is one of its names states the part it is.
+             *     Absent on `/places` and `/autocomplete`. A place is sought by its
+             *     name and a suggestion by what is typed so far, which no address
+             *     reading judges.
              */
             match?: components["schemas"]["QueryMatch"];
             /**
@@ -996,7 +1036,10 @@ export interface components {
          *     query does not state is absent, whatever the result holds for it. Every
          *     result fills in parts the query left out, so naming them says nothing.
          *     The query's parts are the ones its reading labels, so no query states a
-         *     district.
+         *     district. A `country` filter states the country too. A query that is
+         *     wholly one of a place's names states the part that place is, its
+         *     `locality` for a town or a county, its `region`, `postcode`, `country`
+         *     or `street`, and that part is `matched`.
          *
          *     What judges each part is listed below.
          *
@@ -1007,18 +1050,23 @@ export interface components {
          *       for it.
          *     - `street`: the query's street words against the words of the result's
          *       street, as search counts typos. `matched` when the street has each
-         *       word, or the word an abbreviation stands for. `partial` when a word is
-         *       a typo away or missing. `unmatched` when it has none of them or the
+         *       word, the word an abbreviation stands for, or its abbreviation
+         *       (`Street` for a street written `St`), and the query writes every word
+         *       of the street but its type. `partial` when a word is a typo away or
+         *       missing, or the street has a word the query leaves out (`South Main
+         *       Street` for `Main St`). `unmatched` when it has none of them or the
          *       result has no street.
          *     - `unit`: `matched` when the result states the unit, else `unmatched`.
          *     - `locality`: `matched` when an area the result lies in has the name.
          *       `partial` when the name is read through a typo, is the postal town of
          *       the stated postcode, or is a settlement mapped as a point beside the
-         *       result. `unmatched` when the result lies elsewhere or the Pack does
+         *       result, and on a town or county result whose name has a word the
+         *       query leaves out (`East Providence` for `Providence`). `unmatched` when the result lies elsewhere or the Pack does
          *       not know the name.
          *     - `region` and `country`: `matched` when the result lies in the one
-         *       named, `partial` when the name is read through a typo, `unmatched`
-         *       when the Pack does not know the name.
+         *       named, or in a country the `country` filter names. `partial` when the
+         *       name is read through a typo. `unmatched` when the Pack does not know
+         *       the name.
          *     - `postcode`: `matched` when the result or its street states the
          *       postcode. `partial` when one starts the other, or the result only
          *       lies where the postcode does. `unmatched` when the result states
@@ -1089,6 +1137,12 @@ export interface components {
              * @example -79.3832
              */
             lon?: number;
+            /**
+             * Format: double
+             * @description How far to look for the nearest address, street or place, in metres.
+             * @example 150
+             */
+            radius?: number;
         };
         /** @description Properties of a reverse geocoding result. */
         ReverseProperties: components["schemas"]["Common"] & {
@@ -2264,6 +2318,13 @@ export interface operations {
                 lat: number;
                 /** @description Return only the nearest result of this layer, or for an area layer the area of that layer the point lies in, and no other area. An unknown layer returns `400`. */
                 layer?: components["schemas"]["Layer"];
+                /** @description How many results of `layer` to return, nearest first, up to 50. Default and 0 mean 1. Above 1 it needs `layer`. A point lies in one area of each layer, so an area layer returns at most one. */
+                limit?: number;
+                /**
+                 * @description How far to look for the nearest address, street or place, in metres, up to 1000. Default 30. Areas hold the point, so it does not bound them.
+                 * @example 150
+                 */
+                radius?: number;
                 /**
                  * @description Languages to name results and their areas in, as comma-separated language codes. The first names each result and area, falling back to its local name; each other one goes into `translations` where a name in it exists. Repeats count once. A malformed code, or more than 20 distinct codes, returns `400`.
                  * @example fr,de
@@ -2291,7 +2352,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReverseCollection"];
                 };
             };
-            /** @description `lon` or `lat` is missing or out of range, or `layer` is unknown. */
+            /** @description `lon` or `lat` is missing or out of range, `layer` is unknown, `limit` is out of range or above 1 with no `layer`, or `radius` is out of range. */
             400: {
                 headers: {
                     /** @description The media type a QUERY body is read as. */

@@ -56,8 +56,6 @@ function stable(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
   const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
-  // `toSorted` needs ES2023 and the package targets ES2022. The array is fresh, so sorting it in place is safe.
-  // oxlint-disable-next-line unicorn/no-array-sort
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stable(entry)}`).join(",")}}`;
 }

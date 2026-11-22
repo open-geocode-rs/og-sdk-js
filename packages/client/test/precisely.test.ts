@@ -12,13 +12,16 @@ import {
   jobIdOf,
   precisely,
   type PreciselyClient,
-  type PreciselyOptions,
+  type PreciselyOgOptions,
+  type PreciselyVendorClient,
+  type PreciselyVendorOptions,
 } from "../src/precisely.ts";
 import autocompleteFixture from "./fixtures/precisely/autocomplete-200.json" with { type: "json" };
 import submitFixture from "./fixtures/precisely/bulk-submit-202.json" with { type: "json" };
 import cancelFixture from "./fixtures/precisely/cancel-200.json" with { type: "json" };
 import cancelErrorFixture from "./fixtures/precisely/cancel-400.json" with { type: "json" };
 import deleteFileFixture from "./fixtures/precisely/delete-file-200.json" with { type: "json" };
+import explainFixture from "./fixtures/precisely/explain-200.json" with { type: "json" };
 import badRequestFixture from "./fixtures/precisely/error-400.json" with { type: "json" };
 import unauthorizedFixture from "./fixtures/precisely/error-401.json" with { type: "json" };
 import forbiddenFixture from "./fixtures/precisely/error-403.json" with { type: "json" };
@@ -32,6 +35,8 @@ import partialFixture from "./fixtures/precisely/geocode-206.json" with { type: 
 import jobStatusFixture from "./fixtures/precisely/job-status-200.json" with { type: "json" };
 import jobsFixture from "./fixtures/precisely/jobs-200.json" with { type: "json" };
 import lookupFixture from "./fixtures/precisely/lookup-200.json" with { type: "json" };
+import postalCityFixture from "./fixtures/precisely/postal-city-200.json" with { type: "json" };
+import proximityFixture from "./fixtures/precisely/proximity-200.json" with { type: "json" };
 import reverseFixture from "./fixtures/precisely/reverse-200.json" with { type: "json" };
 import tokenFixture from "./fixtures/precisely/token-200.json" with { type: "json" };
 import tokenErrorFixture from "./fixtures/precisely/token-400.json" with { type: "json" };
@@ -51,15 +56,22 @@ const TOKEN: Reply = { body: tokenFixture };
 const DAY = 86_400_000;
 
 /** A client that asks Precisely itself. Its first request is the token call. */
-const onVendor = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
+const onVendor = (
+  fetch: Fetch,
+  options: Partial<PreciselyVendorOptions> = {},
+): PreciselyVendorClient =>
   precisely({ apiKey: KEY, apiSecret: SECRET, fetch, logLevel: "off", ...options });
 
-/** A client that asks og. The key and secret are given to show that they are never sent. */
-const onOg = (fetch: Fetch, options: Partial<PreciselyOptions> = {}): PreciselyClient =>
+/**
+ * A client that asks og, which takes no key, secret or token. It keeps the key, secret and region a
+ * caller already passes for Precisely, as a one-line switch does, and none of them may be sent.
+ */
+const onOg = (fetch: Fetch, options: Partial<PreciselyOgOptions> = {}): PreciselyClient =>
   precisely({
     baseUrl: `${OG}/`,
     apiKey: KEY,
     apiSecret: SECRET,
+    region: "eu1",
     fetch,
     logLevel: "off",
     ...options,
@@ -197,6 +209,61 @@ const CASES: Case[] = [
     reply: { body: autocompleteFixture },
   },
   {
+    name: "autocompletePostalCity",
+    call: (client) =>
+      client.autocompletePostalCity({
+        "X-Request-Id": "trace-4",
+        preferences: { maxResults: 5 },
+        address: { type: "POSTAL", postAddress: "5448", country: "USA" },
+      }),
+    method: "POST",
+    path: "/v1/autocomplete/postal-city",
+    body: {
+      preferences: { maxResults: 5 },
+      address: { type: "POSTAL", postAddress: "5448", country: "USA" },
+    },
+    headers: { "x-request-id": "trace-4" },
+    reply: { body: postalCityFixture },
+  },
+  {
+    name: "proximitySearch",
+    call: (client) =>
+      client.proximitySearch({
+        preferences: {
+          dataset: "premium-address-points",
+          distance: { value: 1, distanceUnit: "KILOMETER" },
+        },
+        location: { addressId: "1", latitude: 44.5231, longitude: -89.5741, country: "USA" },
+      }),
+    method: "POST",
+    path: "/v1/proximity-search",
+    body: {
+      preferences: {
+        dataset: "premium-address-points",
+        distance: { value: 1, distanceUnit: "KILOMETER" },
+      },
+      location: { addressId: "1", latitude: 44.5231, longitude: -89.5741, country: "USA" },
+    },
+    reply: { body: proximityFixture },
+  },
+  {
+    name: "explainAddressCode",
+    call: (client) =>
+      client.explainAddressCode({
+        codeType: "GlobalMatchCode",
+        codes: [{ id: "1", code: "V3-P1S4T3C4-3" }],
+        responseOptions: { includeOfficialDescription: true },
+      }),
+    method: "POST",
+    path: "/v1/explain-addresscode",
+    body: {
+      codeType: "GlobalMatchCode",
+      codes: [{ id: "1", code: "V3-P1S4T3C4-3" }],
+      responseOptions: { includeOfficialDescription: true },
+    },
+    reply: { body: explainFixture },
+  },
+  {
     name: "bulk.uploadUrl",
     call: (client) => client.bulk.uploadUrl({ fileName: "harbour_batch" }),
     method: "POST",
@@ -325,6 +392,7 @@ describe("precisely", () => {
       for (const options of [{}, { apiKey: KEY }, { apiSecret: SECRET }]) {
         let thrown: unknown;
         try {
+          // @ts-expect-error The types refuse these, so this is a JavaScript caller's mistake.
           precisely(options);
         } catch (error) {
           thrown = error;
@@ -390,12 +458,11 @@ describe("precisely", () => {
       expect(outcome.cache).toEqual({ maxTtl: 0 });
     });
 
-    it("asks og for a token without the key and secret", async () => {
-      const fetch = fakeFetch(TOKEN);
-      expect(await onOg(fetch).token()).toEqual(tokenFixture);
-      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/auth/v2/token`]);
-      expect(headersOf(fetch)["authorization"]).toBeUndefined();
-      expect(rawBodyOf(fetch)).toBe("grant_type=client_credentials&scope=default");
+    it("is not a call of the og client, which sends no token", () => {
+      const client = onOg(fakeFetch());
+      // @ts-expect-error og takes no token, so its client has no token call.
+      expect(client.token).toBeUndefined();
+      expect("token" in client).toBe(false);
     });
   });
 
@@ -567,12 +634,6 @@ describe("precisely", () => {
         `${HOST}/v2/files`,
       ]);
     });
-
-    it("means nothing to og", async () => {
-      const fetch = fakeFetch({ body: geocodeFixture });
-      await onOg(fetch, { region: "eu1" }).geocode({ addresses: [address] });
-      expect(urlsOf(fetch)).toEqual([`${OG_ROOT}/v1/geocode`]);
-    });
   });
 
   describe("bulk.upload", () => {
@@ -706,6 +767,15 @@ describe("precisely", () => {
         expect(fetch).toHaveBeenCalledTimes(1);
       },
     );
+
+    it("sends autocompletePostalCity once, since a retried keystroke is already stale", async () => {
+      const fetch = fakeFetch(busy, { body: postalCityFixture });
+      const error = await caught(
+        onOg(fetch).autocompletePostalCity({ address: { postAddress: "5448", country: "USA" } }),
+      );
+      expect(error).toMatchObject({ code: "unavailable", operation: "autocompletePostalCity" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
 
     it("repeats a type-ahead call when the caller asks for it", async () => {
       const fetch = fakeFetch(busy, { body: autocompleteFixture });
@@ -954,6 +1024,30 @@ describe("precisely", () => {
       });
     });
 
+    it("are told the points of a postal-city and a proximity answer, and none of an explanation", async () => {
+      const { plugin, seen } = recorder();
+      const fetch = fakeFetch(
+        { body: postalCityFixture },
+        { body: proximityFixture },
+        { body: explainFixture },
+      );
+      const client = onOg(fetch, { plugins: [plugin] });
+      await client.autocompletePostalCity({ address: { postAddress: "5448", country: "USA" } });
+      await client.proximitySearch({
+        preferences: { dataset: "premium-address-points" },
+        location: { latitude: 44.5231, longitude: -89.5741, country: "USA" },
+      });
+      await client.explainAddressCode({
+        codeType: "GlobalMatchCode",
+        codes: [{ code: "V4-P4-5" }],
+      });
+      expect(seen).toEqual({
+        autocompletePostalCity: [{ lat: 44.52307, lon: -89.57412 }],
+        proximitySearch: [{ lat: 44.52311, lon: -89.57409 }],
+        explainAddressCode: [],
+      });
+    });
+
     it("are told the first point of each item of a batch", async () => {
       const { plugin, seen } = recorder();
       const fetch = fakeFetch({ status: 206, body: partialFixture });
@@ -978,7 +1072,7 @@ describe("precisely", () => {
     );
 
     it("can send any lookup again on another client, by the name of its method", async () => {
-      const lookups = CASES.slice(0, 7);
+      const lookups = CASES.slice(0, 10);
       for (const expected of lookups) {
         const second = fakeFetch(expected.reply);
         const other = onOg(second);
@@ -994,12 +1088,11 @@ describe("precisely", () => {
       }
     });
 
-    it("never see the token, file and job calls", async () => {
+    it("never see the file and job calls", async () => {
       const handle = vi.fn<Plugin["handle"]>((_call, next) => next());
       const fetch = fakeFetch({ body: jobStatusFixture });
       const client = onOg(fetch, { plugins: [{ name: "spy", handle }] });
       const url = `${OG_ROOT}/v2/files/${FILE_ID}/content`;
-      await client.token();
       await client.bulk.uploadUrl({ fileName: "f" });
       await client.bulk.upload({ url, content: "a" });
       await client.bulk.files();
@@ -1010,7 +1103,7 @@ describe("precisely", () => {
       await client.bulk.status({ jobId: JOB_ID });
       await client.bulk.cancel({ jobId: JOB_ID });
       await client.bulk.results({ downloadUrl: `${OG_ROOT}/v2/bulk/jobs/${JOB_ID}/output` });
-      expect(fetch).toHaveBeenCalledTimes(11);
+      expect(fetch).toHaveBeenCalledTimes(10);
       expect(handle).not.toHaveBeenCalled();
       await client.geocode({ addresses: [address] });
       expect(handle).toHaveBeenCalledTimes(1);

@@ -351,6 +351,72 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
     expectCredential(target, fetch);
   });
 
+  it("places.getPhotoMedia puts the name in the path and asks for the URI, not a redirect", async () => {
+    const media = {
+      name: `places/${PLACE_ID}/photos/photo-1/media`,
+      photoUri: "https://photos.example/photo-1",
+    };
+    const { client, fetch } = build(target, [{ body: media }]);
+    const answer = await client.places.getPhotoMedia({
+      name: `places/${PLACE_ID}/photos/photo-1/media`,
+      maxWidthPx: 400,
+    });
+    expect(answer).toEqual(media);
+    expect(methodOf(fetch)).toBe("GET");
+    expect(hasBody(fetch)).toBe(false);
+    expect(String(fetch.mock.calls[0]![0])).toBe(
+      `${target.places}/v1/places/${PLACE_ID}/photos/photo-1/media?maxWidthPx=400&skipHttpRedirect=true`,
+    );
+    expect(headersOf(fetch)).not.toHaveProperty("x-goog-fieldmask");
+    expectCredential(target, fetch);
+  });
+
+  it("geocode.destinations posts the query and sends the field mask as a header", async () => {
+    const found = {
+      destinations: [
+        {
+          primary: {
+            place: "places/a",
+            placeId: "a",
+            displayName: { text: "1 Test Street" },
+            location: { latitude: 1.5, longitude: 2.5 },
+          },
+          entrances: [{ location: { latitude: 1.5001, longitude: 2.5 }, tags: ["PREFERRED"] }],
+        },
+      ],
+    };
+    const { client, fetch } = build(target, [{ body: found }]);
+    const params = {
+      addressQuery: { addressQuery: "1 Test Street" },
+      languageCode: "en",
+      fieldMask: ["destinations.primary", "destinations.entrances"],
+    } as const;
+    const answer = await client.geocode.destinations(params);
+    expect(answer).toEqual(found);
+    expect(methodOf(fetch)).toBe("POST");
+    expect(String(fetch.mock.calls[0]![0])).toBe(`${target.geocode}/v4/geocode/destinations`);
+    expect(headersOf(fetch)["x-goog-fieldmask"]).toBe(
+      "destinations.primary,destinations.entrances",
+    );
+    const { fieldMask: _mask, ...body } = params;
+    expect(bodyOf(fetch)).toEqual(body);
+    expectCredential(target, fetch);
+  });
+
+  it("reads the full resource name a Geocoding result's place gives as the place", async () => {
+    const result = (geocodeAddress.results as unknown[])[0];
+    const { client, fetch } = build(target, [{ body: result }]);
+    const full = `//places.googleapis.com/places/${PLACE_ID}`;
+    await client.places.get({ name: full, fieldMask: ["id"] });
+    await client.geocode.place({ place: full });
+    expect(String(fetch.mock.calls[0]![0])).toBe(`${target.places}/v1/places/${PLACE_ID}`);
+    expect(String(fetch.mock.calls[1]![0])).toBe(`${target.geocode}/v4/geocode/places/${PLACE_ID}`);
+    // Another service's name is still no place.
+    await expect(
+      client.places.get({ name: `//maps.example.com/places/${PLACE_ID}`, fieldMask: ["id"] }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("refuses a resource name that is not one, before any request", async () => {
     const { client, fetch } = build(target, [{ body: {} }]);
     for (const name of [PLACE_ID, "places/", "places/..", "places/a//b", "other/abc"]) {
@@ -362,6 +428,15 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
       code: "invalid_request",
       operation: "geocode.place",
     });
+    for (const name of [
+      `places/${PLACE_ID}/photos/p`,
+      `places/${PLACE_ID}`,
+      "places/a/photos//media",
+    ])
+      await expect(client.places.getPhotoMedia({ name, maxHeightPx: 10 })).rejects.toMatchObject({
+        code: "invalid_request",
+        operation: "places.getPhotoMedia",
+      });
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -542,6 +617,8 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
         { body: results },
         { body: results },
         { body: one },
+        { body: { destinations: [{ primary: one }, {}] } },
+        { body: { name: "places/a/photos/p/media" } },
         { body: {} },
       ],
       { plugins: [spy] },
@@ -554,6 +631,8 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
     await client.geocode.address({ addressQuery: "2 Avenue de Monte-Carlo" });
     await client.geocode.location({ locationQuery: "43.7377547,7.4270688" });
     await client.geocode.place({ place: "places/a" });
+    await client.geocode.destinations({ place: "places/a" });
+    await client.places.getPhotoMedia({ name: "places/a/photos/p/media", maxWidthPx: 10 });
     const expectedPlaces = [
       { lat: 43.7391605, lon: 7.428023 },
       { lat: 5.5, lon: 0 },
@@ -570,6 +649,9 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
       "geocode.address": expectedResults,
       "geocode.location": expectedResults,
       "geocode.place": [{ lat: 43.7391605, lon: 7.428023 }],
+      // A destination with no primary place has no point.
+      "geocode.destinations": [{ lat: 43.7391605, lon: 7.428023 }],
+      "places.getPhotoMedia": [],
     });
     // An answer with no results has no points.
     await client.geocode.address({ addressQuery: "nowhere" });
@@ -614,6 +696,18 @@ describe.each(TARGETS)("requests when $server answers", (target) => {
         "/v4/geocode/location/43.7,7.4",
       ],
       [() => client.geocode.place({ place: "places/abc" }, options), "/v4/geocode/places/abc"],
+      [
+        () => client.geocode.destinations({ place: "places/abc" }, options),
+        "/v4/geocode/destinations",
+      ],
+      [
+        () =>
+          client.places.getPhotoMedia(
+            { name: "places/abc/photos/p/media", maxHeightPx: 100 },
+            options,
+          ),
+        "/v1/places/abc/photos/p/media",
+      ],
     ];
     for (const [index, [run, path]] of calls.entries()) {
       await expect(run()).resolves.toEqual({ from: "other" });

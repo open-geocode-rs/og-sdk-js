@@ -172,7 +172,7 @@ bun run size           # size budgets of every client and plugin
 bun run docs           # API reference into docs/
 bun run docs:page      # the local docs page, into docs-preview/
 bun run test:ecosystem # build a real Vite app, check a client pulls in no other vendor, and run under Node, Bun and Deno
-bun run gen            # regenerate og's types from og's contract
+bun run gen            # regenerate og's types from the pinned og submodule's contract
 ```
 
 Each vendor client is tested twice.
@@ -180,9 +180,17 @@ One suite replays responses in the vendor's documented shape, kept under `packag
 The fixtures are synthetic, with every value made up, except Google's, which are documentation examples credited in `packages/client/test/fixtures/google/NOTICE.md`.
 The other suite calls a real og server's `/compat` routes, and runs when you point it at one.
 
+The og-backed suites run on two Packs.
+The vendor suites assert a Monaco Pack.
+The company flows (`packages/client/test/flows.compat.test.ts`) run on a Rhode Island Pack, with regions, US addresses and towns that share a word, calibrated so that results carry scores.
+`ecosystem-tests/og/serve.sh` builds both from OSM extracts, calibrates the Rhode Island one with the held-out OpenAddresses rows beside it, and serves og on each with callbacks to this machine allowed, which the HERE notification tests need.
+CI runs it the same way.
+
 ```sh
-# A running og server, and an address its Pack holds.
-OG_URL=http://127.0.0.1:8081 OG_TEST_ADDRESS="24 Sussex Drive Ottawa" bun run test
+cargo build --release --bin open-geocode --manifest-path og/Cargo.toml
+ecosystem-tests/og/serve.sh og/target/release/open-geocode .og-test 18900 18901
+OG_URL=http://127.0.0.1:18900 OG_RI_URL=http://127.0.0.1:18901 \
+  OG_TEST_ADDRESS="12 Boulevard des Moulins Monaco" bun run test
 ```
 
 `examples/plain-html` shows the widget on a checkout form.

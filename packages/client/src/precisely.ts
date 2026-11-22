@@ -37,6 +37,8 @@ import type {
   CancelJobResponse,
   DeleteFileParams,
   DeleteFileResponse,
+  ExplainAddressCodeParams,
+  ExplainAddressCodeResponse,
   ExpressAutocompleteV2Params,
   GeocodeParams,
   GeocodeResponse,
@@ -47,6 +49,10 @@ import type {
   ListJobsResponse,
   LookupParams,
   LookupResponse,
+  PostalCityParams,
+  PostalCityResponse,
+  ProximitySearchParams,
+  ProximitySearchResponse,
   ResultsParams,
   ReverseGeocodeParams,
   ReverseGeocodeResponse,
@@ -66,29 +72,50 @@ const HOST = "https://api.cloud.precisely.com";
 /** The regions Precisely answers real-time Geo Addressing calls from, besides its default host. */
 export type PreciselyRegion = "eu1" | "au1" | "gb1";
 
-/** Options for {@link precisely}. Give `baseUrl`, or `apiKey` with `apiSecret`. */
-export interface PreciselyOptions extends CommonOptions {
+/**
+ * Options for {@link precisely} against an og server.
+ * A key, secret and region the caller already passes for Precisely may stay, so switching is one added line, and none of them is sent.
+ */
+export interface PreciselyOgOptions extends CommonOptions {
   /** An og server. Requests go to `<baseUrl>/compat/precisely`, and no key, secret or token is sent. */
-  baseUrl?: string | undefined;
-  /** A Precisely API key, for asking Precisely itself. It needs `apiSecret`. */
+  baseUrl: string;
+  /** Accepted and never sent to og. */
   apiKey?: string | undefined;
-  /** The secret of the API key. */
+  /** Accepted and never sent to og. */
   apiSecret?: string | undefined;
+  /** Accepted and unused, since og answers every call itself. */
+  region?: PreciselyRegion | undefined;
+}
+
+/** Options for {@link precisely} against Precisely itself. */
+export interface PreciselyVendorOptions extends CommonOptions {
+  baseUrl?: undefined;
+  /** A Precisely API key. */
+  apiKey: string;
+  /** The secret of the API key. */
+  apiSecret: string;
   /**
-   * The regional host that answers the real-time calls when Precisely itself is asked.
+   * The regional host that answers the real-time calls.
    * Default `https://api.cloud.precisely.com`.
    * The token call and the bulk calls always go to the default host, the only one Precisely documents for them.
    */
   region?: PreciselyRegion | undefined;
 }
 
-/** The Precisely client. */
-export interface PreciselyClient extends ClientInfo {
+/** Options for {@link precisely}. Give `baseUrl`, or `apiKey` with `apiSecret`. */
+export type PreciselyOptions = PreciselyOgOptions | PreciselyVendorOptions;
+
+/** The Precisely client against Precisely itself, which also trades the key for a token. */
+export interface PreciselyVendorClient extends PreciselyClient {
   /**
    * `POST /auth/v2/token`. Trades the API key and secret for a bearer token.
    * The other methods do this by themselves, so call it only to hand a token to something else.
    */
   token(options?: RequestOptions): APIPromise<TokenResponse>;
+}
+
+/** The Precisely client. Against og it sends no token, so it has no token call. */
+export interface PreciselyClient extends ClientInfo {
   /** `POST /v1/geocode`. Finds the point of up to 25 addresses. */
   geocode(params: GeocodeParams, options?: RequestOptions): APIPromise<GeocodeResponse>;
   /** `POST /v1/reverse-geocode`. Finds the address at up to 25 points. */
@@ -115,6 +142,24 @@ export interface PreciselyClient extends ClientInfo {
     params: ExpressAutocompleteV2Params,
     options?: RequestOptions,
   ): APIPromise<AutocompleteResponse>;
+  /**
+   * `POST /v1/autocomplete/postal-city`. Predicts the postal code or town being typed.
+   * It is not retried unless `maxRetries` says so.
+   */
+  autocompletePostalCity(
+    params: PostalCityParams,
+    options?: RequestOptions,
+  ): APIPromise<PostalCityResponse>;
+  /** `POST /v1/proximity-search`. Finds the addresses nearest a point. */
+  proximitySearch(
+    params: ProximitySearchParams,
+    options?: RequestOptions,
+  ): APIPromise<ProximitySearchResponse>;
+  /** `POST /v1/explain-addresscode`. Reads up to 25 codes of an earlier answer, such as a Global Match Code, as words. */
+  explainAddressCode(
+    params: ExplainAddressCodeParams,
+    options?: RequestOptions,
+  ): APIPromise<ExplainAddressCodeResponse>;
   /** Bulk Geo Addressing v2. Upload a file, start a job over it, poll the job and read its output. */
   bulk: {
     /** `POST /v2/files/upload-url`. Asks for a file ID and the URL to upload the input file to. */
@@ -279,7 +324,21 @@ const PREDICTION_METHODS: ReadonlySet<string> = new Set([
   "autocomplete",
   "expressAutocomplete",
   "expressAutocompleteV2",
+  "autocompletePostalCity",
 ]);
+
+/** The point of a proximity search result, which Precisely writes as a latitude and a longitude. */
+function proximityPoint(result: unknown): Position | undefined {
+  const location = record(record(result)?.["location"]);
+  const lat: unknown = location?.["latitude"];
+  const lon: unknown = location?.["longitude"];
+  return typeof lon === "number" &&
+    typeof lat === "number" &&
+    Number.isFinite(lon) &&
+    Number.isFinite(lat)
+    ? { lat, lon }
+    : undefined;
+}
 
 /**
  * The points of an answer. A request with one item gives every candidate of that item.
@@ -288,6 +347,12 @@ const PREDICTION_METHODS: ReadonlySet<string> = new Set([
 function positions(method: string, data: unknown): Position[] {
   if (PREDICTION_METHODS.has(method))
     return pointsOf(record(record(data)?.["response"])?.["predictions"]);
+  if (method === "proximitySearch") {
+    const results = record(record(data)?.["response"])?.["results"];
+    return (Array.isArray(results) ? results : [])
+      .map(proximityPoint)
+      .filter((point) => point !== undefined);
+  }
   if (!BATCH_METHODS.has(method)) return [];
   const responses = record(data)?.["responses"];
   if (!Array.isArray(responses)) return [];
@@ -340,9 +405,12 @@ const jobPath = (params: JobParams): string => `/v2/bulk/jobs/${encodeURICompone
 
 /**
  * Builds a client that speaks Precisely's API.
- * It asks the og server at `baseUrl`, or Precisely itself when only `apiKey` and `apiSecret` are given.
+ * It asks the og server at `baseUrl`, or Precisely itself when `apiKey` and `apiSecret` are given.
  */
-export function precisely(options: PreciselyOptions): PreciselyClient {
+export function precisely(options: PreciselyOgOptions): PreciselyClient;
+export function precisely(options: PreciselyVendorOptions): PreciselyVendorClient;
+export function precisely(options: PreciselyOptions): PreciselyClient | PreciselyVendorClient;
+export function precisely(options: PreciselyOptions): PreciselyClient | PreciselyVendorClient {
   const base = createBase({
     shape: "precisely",
     options,
@@ -476,11 +544,9 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
         },
       });
 
-  return {
+  const client: PreciselyClient = {
     shape: base.shape,
     server: base.server,
-    token: (request) =>
-      job({ method: "token", args: [], options: request, send: (o) => exchange(o) }),
     geocode: (params, request) => lookup("geocode", "/v1/geocode", params, request),
     reverseGeocode: (params, request) =>
       lookup("reverseGeocode", "/v1/reverse-geocode", params, request),
@@ -492,6 +558,12 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
       lookup("expressAutocomplete", "/v1/express-autocomplete", params, request, true),
     expressAutocompleteV2: (params, request) =>
       lookup("expressAutocompleteV2", "/v2/express-autocomplete", params, request, true),
+    autocompletePostalCity: (params, request) =>
+      lookup("autocompletePostalCity", "/v1/autocomplete/postal-city", params, request, true),
+    proximitySearch: (params, request) =>
+      lookup("proximitySearch", "/v1/proximity-search", params, request),
+    explainAddressCode: (params, request) =>
+      lookup("explainAddressCode", "/v1/explain-addresscode", params, request),
     bulk: {
       uploadUrl: (params, request) =>
         job({
@@ -620,4 +692,8 @@ export function precisely(options: PreciselyOptions): PreciselyClient {
         }),
     },
   };
+  if (!vendor) return client;
+  const token: PreciselyVendorClient["token"] = (request) =>
+    job({ method: "token", args: [], options: request, send: (o) => exchange(o) });
+  return { ...client, token };
 }

@@ -8,3 +8,5 @@ __screenshots__/
 .vitest/
 docs/
 docs-preview/
+.og/
+.og-test/

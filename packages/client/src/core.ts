@@ -340,10 +340,13 @@ export class APIPromise<T> extends Promise<T> {
   readonly #outcome: Promise<Outcome<T>>;
 
   constructor(outcome: Promise<Outcome<T>>) {
-    super((resolve) => resolve(undefined as T));
+    super((resolve, reject) => {
+      outcome.then((settled) => resolve(settled.data), reject);
+    });
     this.#outcome = outcome;
-    // Rejections surface through then() or withResponse(), never as unhandled.
+    // A caller may read only one of the two, so neither rejects unhandled.
     outcome.catch(() => {});
+    this.catch(() => {});
   }
 
   static override get [Symbol.species](): PromiseConstructor {
@@ -353,24 +356,5 @@ export class APIPromise<T> extends Promise<T> {
   /** The parsed data with the raw `Response`, whose body is already read. */
   withResponse(): Promise<Outcome<T>> {
     return this.#outcome;
-  }
-
-  // APIPromise is a Promise, so it must define then().
-  // oxlint-disable-next-line unicorn/no-thenable
-  override then<A = T, B = never>(
-    onfulfilled?: ((value: T) => A | PromiseLike<A>) | null,
-    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
-  ): Promise<A | B> {
-    return this.#outcome.then((outcome) => outcome.data).then(onfulfilled, onrejected);
-  }
-
-  override catch<B = never>(
-    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
-  ): Promise<T | B> {
-    return this.then(undefined, onrejected);
-  }
-
-  override finally(onfinally?: (() => void) | null): Promise<T> {
-    return this.then().finally(onfinally);
   }
 }

@@ -42,7 +42,7 @@ describe.runIf(OG_URL)("mapbox against og", () => {
       expect(feature.properties).toMatchObject({
         feature_type: "address",
         name: ADDRESS,
-        coordinates: { ...POINT, accuracy: "rooftop" },
+        coordinates: { ...POINT, accuracy: "point" },
       });
       expect(feature.properties.full_address).toContain(ADDRESS);
       expect(feature.properties.context).toMatchObject({
@@ -237,7 +237,7 @@ describe.runIf(OG_URL)("mapbox against og", () => {
         name: ADDRESS,
         feature_type: "address",
         address: ADDRESS,
-        coordinates: { ...POINT, accuracy: "rooftop" },
+        coordinates: { ...POINT, accuracy: "point" },
         context: {
           address: { address_number: "2", street_name: "Avenue de Monte-Carlo" },
           place: { name: "Monaco" },

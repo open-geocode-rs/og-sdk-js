@@ -10,8 +10,6 @@ const OG_URL = process.env["OG_URL"];
 const ADDRESS = "2 Avenue de Monte-Carlo";
 const LON = 7.4270688;
 const LAT = 43.7377547;
-const KEY = "ak-never-sent";
-const SECRET = "shh-never-sent";
 
 const caught = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
   Promise.resolve(promise).then(
@@ -21,7 +19,7 @@ const caught = (promise: PromiseLike<unknown>): Promise<GeocoderError> =>
     (error: GeocoderError) => error,
   );
 
-/** og's ID for a candidate, which it puts where Precisely puts its own key. */
+/** The og reference a Precisely-shaped response returns for lookup. */
 const keyOf = (result: Result | undefined): string => result?.customFields?.["PB_KEY"] ?? "";
 
 // These run against a real og server, which answers Precisely's API under /compat/precisely.
@@ -41,11 +39,8 @@ describe.runIf(OG_URL)("precisely against og", () => {
       return outcome;
     },
   };
-  // A key and a secret are given to show that og is asked without them and answers all the same.
   const client = precisely({
-    baseUrl: OG_URL,
-    apiKey: KEY,
-    apiSecret: SECRET,
+    baseUrl: OG_URL ?? "",
     fetch: recording,
     plugins: [recorder],
     logLevel: "off",
@@ -233,7 +228,7 @@ describe.runIf(OG_URL)("precisely against og", () => {
         addresses: [{ addressLines: [ADDRESS], country: "MC" }],
       });
       const key = keyOf(geocoded.responses[0]?.results?.[0]);
-      expect(key).not.toBe("");
+      expect(key).toMatch(/^og_/);
 
       const outcome = await client
         .lookup({ keys: [{ key, type: "PB_KEY", country: "MC" }] })
@@ -327,39 +322,148 @@ describe.runIf(OG_URL)("precisely against og", () => {
     });
   });
 
-  describe("token", () => {
-    it("hands out a bearer token to a client that asks for one", async () => {
-      const outcome = await client.token().withResponse();
-      expect(outcome.response?.url).toBe(`${OG_URL}/compat/precisely/auth/v2/token`);
-      expect(outcome.data).toEqual({
-        access_token: expect.any(String),
-        token_type: "Bearer",
-        expires_in: 3600,
-        scope: "default",
+  describe("verify", () => {
+    it("answers the address og matched, standardized, with no point", async () => {
+      const outcome = await client
+        .verify({ addresses: [{ addressId: "v1", addressLines: [ADDRESS], country: "MCO" }] })
+        .withResponse();
+      expect(outcome.response?.status).toBe(200);
+      expect(outcome.response?.url).toBe(`${OG_URL}/compat/precisely/v1/verify`);
+      const item = outcome.data.responses[0]!;
+      expect(item).toMatchObject({ addressId: "v1", status: "OK" });
+      const result = item.results![0]!;
+      expect(result.address).toMatchObject({
+        formattedStreetAddress: ADDRESS,
+        addressNumber: "2",
+        street: "Avenue de Monte-Carlo",
+        country: { isoAlpha2Code: "MC", isoAlpha3Code: "MCO" },
       });
-      expect(outcome.data.access_token).not.toBe("");
+      expect(result.location).toBeUndefined();
+      expect(result.addressLines?.[0]).toBe(ADDRESS);
+      expect(result.explanation?.addressMatch?.description).toEqual(
+        expect.arrayContaining([
+          { label: "addressNumber", matchType: "EXACT" },
+          { label: "street", matchType: "EXACT" },
+        ]),
+      );
+      expect(keyOf(result)).not.toBe("");
+      // The Monaco Pack is not calibrated, and a match code ends in the confidence
+      // only a calibrated score gives, so there is none. The company flows check one.
+      expect(result.score).toBeUndefined();
+      expect(result.customFields?.["SIMPLE_MATCH_CODE"]).toBeUndefined();
+      expect(seen["verify"]).toEqual([]);
+
+      // A code reads back as words. The company flows read back one verify gave.
+      const code = "V4-P4S4A6T4R6Z6C4-4";
+      const explained = await client.explainAddressCode({
+        codeType: "GlobalMatchCode",
+        codes: [{ id: "c1", code }],
+        responseOptions: { includeOfficialDescription: true },
+      });
+      const first = explained.responses[0]!;
+      expect(first).toMatchObject({
+        id: "c1",
+        status: "OK",
+        result: { codeType: "GlobalMatchCode" },
+      });
+      expect(first.result?.customerInsightSummary).toMatch(/^Address premise verified with /);
+      expect(first.result?.officialDescription?.componentMatchStatus?.["S"]).toEqual({
+        label: "Street",
+        value: 4,
+        meaning: "Verified without changes",
+      });
+      expect(explained.generatedAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     });
   });
 
-  describe("what og does not have", () => {
-    it("fails verify with code unsupported", async () => {
+  describe("explainAddressCode", () => {
+    it("refuses a malformed code", async () => {
       const error = await caught(
-        client.verify({ addresses: [{ addressLines: [ADDRESS], country: "MC" }] }),
+        client.explainAddressCode({ codeType: "GlobalMatchCode", codes: [{ code: "V5-P4-5" }] }),
       );
-      expect(error).toMatchObject({
-        code: "unsupported",
-        status: 501,
-        provider: "og",
-        operation: "verify",
-      });
-      expect((error.body as ErrorResponse).errors[0]?.status).toBe("NOT_IMPLEMENTED");
+      expect(error).toMatchObject({ code: "invalid_request", status: 400 });
+      expect(error.message).toContain("(DIS-LI-1040)");
     });
 
-    it("fails bulk.verify with code unsupported", async () => {
+    it("answers a code type og issues none of as not explained", async () => {
+      const outcome = await client
+        .explainAddressCode({ codeType: "ForwardResultCode", codes: [{ code: "S8HPNTSCZA" }] })
+        .withResponse();
+      expect(outcome.response?.status).toBe(206);
+      expect(outcome.data.responses[0]?.status).toBe("ERROR");
+    });
+  });
+
+  describe("autocompletePostalCity", () => {
+    it("completes a postal code with its town", async () => {
+      const outcome = await client
+        .autocompletePostalCity({
+          preferences: { maxResults: 3 },
+          address: { type: "POSTAL", postAddress: "980", country: "MCO" },
+        })
+        .withResponse();
+      expect(outcome.response?.url).toBe(`${OG_URL}/compat/precisely/v1/autocomplete/postal-city`);
+      const { response } = outcome.data;
+      expect(response.status).toBe("OK");
+      expect(response.predictions?.[0]?.address).toMatchObject({
+        country: { isoAlpha3Code: "MCO" },
+        postalCode: expect.stringMatching(/^980/),
+      });
+      expect(seen["autocompletePostalCity"]?.length).toBe(response.predictions?.length);
+    });
+
+    it("completes a town", async () => {
+      const { response } = await client.autocompletePostalCity({
+        address: { type: "CITY", postAddress: "Mona", country: "MC" },
+      });
+      expect(response.status).toBe("OK");
+      expect(response.predictions?.[0]?.address?.city?.longName).toBe("Monaco");
+    });
+  });
+
+  describe("proximitySearch", () => {
+    it("finds the nearest address, its distance in the unit asked", async () => {
+      const outcome = await client
+        .proximitySearch({
+          preferences: {
+            dataset: "osm",
+            distance: { value: 100, distanceUnit: "METER" },
+          },
+          location: { addressId: "p1", latitude: LAT, longitude: LON, country: "MCO" },
+        })
+        .withResponse();
+      expect(outcome.response?.url).toBe(`${OG_URL}/compat/precisely/v1/proximity-search`);
+      const { response } = outcome.data;
+      expect(response).toMatchObject({ addressId: "p1", status: "OK" });
+      const result = response.results![0]!;
+      expect(result.distance).toBeGreaterThanOrEqual(0);
+      expect(result.distance).toBeLessThan(100);
+      expect(result.metadata).toMatchObject({ COUNTRY: "MCO", PBKEY: expect.any(String) });
+      expect(seen["proximitySearch"]).toEqual([
+        { lat: result.location!.latitude, lon: result.location!.longitude },
+      ]);
+    });
+
+    it("refuses a dataset og does not hold", async () => {
       const error = await caught(
-        client.bulk.verify({ fileId: "3c6e1a47-9d52-4b08-a7f3-61e0c5d2b894" }),
+        client.proximitySearch({
+          preferences: { dataset: "premium-address-points" },
+          location: { latitude: LAT, longitude: LON, country: "MCO" },
+        }),
       );
-      expect(error).toMatchObject({ code: "unsupported", status: 501, operation: "bulk.verify" });
+      expect(error).toMatchObject({ code: "invalid_request", status: 400 });
+      expect(error.message).toContain("premium-address-points");
+    });
+
+    it("refuses a search without a dataset", async () => {
+      const error = await caught(
+        client.proximitySearch({
+          preferences: { dataset: "" },
+          location: { latitude: LAT, longitude: LON, country: "MCO" },
+        }),
+      );
+      expect(error).toMatchObject({ code: "invalid_request", status: 400 });
+      expect(error.message).toContain("(DIS-LI-1031)");
     });
   });
 
@@ -466,6 +570,37 @@ describe.runIf(OG_URL)("precisely against og", () => {
       expect(gone.results.map((file) => file.fileId)).not.toContain(fileId);
     });
 
+    it("runs a verify job, whose output has no point", async () => {
+      const { fileId, url } = await client.bulk.uploadUrl({
+        fileName: `compat_verify_${Date.now()}`,
+      });
+      await client.bulk.upload({
+        url,
+        content: `addressId,address,city,country\nrow-1,${ADDRESS},Monaco,MCO\n`,
+      });
+      const submitted = await client.bulk.verify({ fileId, delimiter: "," }).withResponse();
+      expect(submitted.response?.status).toBe(202);
+      const jobId = jobIdOf(submitted.data.statusUrl);
+      let status = await client.bulk.status({ jobId });
+      for (let tries = 0; status.status === "RUNNING" && tries < 100; tries++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        status = await client.bulk.status({ jobId });
+      }
+      expect(status.status).toBe("COMPLETED");
+      const lines = (await client.bulk.results({ downloadUrl: status.downloadUrl! }))
+        .trim()
+        .split("\n");
+      expect(lines).toHaveLength(2);
+      const header = lines[0]!.split(",");
+      expect(header).not.toContain("latitude");
+      expect(header).not.toContain("longitude");
+      expect(header).toContain("customFields");
+      expect(lines[1]).toMatch(/^row-1,OK,,/);
+      expect(lines[1]).toContain(ADDRESS);
+      expect(lines[1]).not.toContain("simpleMatchCode");
+      await client.bulk.deleteFile({ fileId });
+    });
+
     it("lists no job as scheduled, since og starts every job at once", async () => {
       expect(await client.bulk.jobs({ status: "scheduled" })).toEqual({ jobs: [] });
     });
@@ -505,16 +640,13 @@ describe.runIf(OG_URL)("precisely against og", () => {
   });
 
   // This runs last, over everything the tests above sent.
-  it("never sent the key, the secret or a token, and never asked for one by itself", () => {
+  it("never asked for a token and never sent one", () => {
     expect(sent.length).toBeGreaterThan(20);
-    const tokenCalls = sent.filter((request) => request.url.endsWith("/auth/v2/token"));
-    // The one token call is the one a test made by name.
-    expect(tokenCalls).toHaveLength(1);
     for (const request of sent) {
       expect(request.url.startsWith(`${OG_URL}/compat/precisely/`)).toBe(true);
+      expect(request.url).not.toContain("/auth/");
       const all = JSON.stringify(request);
-      for (const credential of [KEY, SECRET, btoa(`${KEY}:${SECRET}`), "Bearer", "Basic"])
-        expect(all).not.toContain(credential);
+      for (const credential of ["Bearer", "Basic"]) expect(all).not.toContain(credential);
       expect(Object.keys(request.headers).map((name) => name.toLowerCase())).not.toContain(
         "authorization",
       );
