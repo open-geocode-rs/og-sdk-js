@@ -1,0 +1,54 @@
+{
+  "places": [
+    {
+      "id": "ChIJVVVVVYx3j4ARP-3NGldc8qQ",
+      "displayName": {
+        "text": "San Francisco International Airport",
+        "languageCode": "en"
+      },
+      "entrances": [
+        {
+          "location": {
+            "latitude": 37.6172154,
+            "longitude": -122.3839724
+          }
+        },
+        {
+          "location": {
+            "latitude": 37.6174073,
+            "longitude": -122.384196
+          }
+        },
+        ...
+      ],
+      "navigationPoints": [
+        {
+          "navigationPointToken": "ChIJoioBjMLOQkAR0A3yH_eYXsA...",
+          "displayName": {
+            "text": "International Terminal Departures Level",
+            "languageCode": "en"
+          },
+          "location": {
+            "latitude": 37.6153121,
+            "longitude": -122.3900833
+          },
+          "travelModes": ["WALK"]
+        },
+        {
+          "navigationPointToken": "ChIJy5JKws_OQkAROx0jNN2YXsA...",
+          "displayName": {
+            "text": "Domestic Garage - SFO Short Term Parking",
+            "languageCode": "en"
+          },
+          "location": {
+            "latitude": 37.6157153,
+            "longitude": -122.3885012
+          },
+          "travelModes": ["DRIVE", "WALK"],
+          "usages": ["PARKING"]
+        },
+        ...
+      ]
+    }
+  ]
+}

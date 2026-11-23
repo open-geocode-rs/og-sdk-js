@@ -2,10 +2,11 @@
 
 JavaScript and TypeScript SDK for [open-geocode](https://github.com/open-geocode-rs/open-geocode), the self-hosted geocoder.
 
-| Package                                               | What it is                                                                                |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [`@open-geocode/client`](packages/client)             | Typed client for og's API, generated from og's OpenAPI contract. No runtime dependencies. |
-| [`@open-geocode/autocomplete`](packages/autocomplete) | `<og-autocomplete>`, a drop-in address and place autocomplete Web Component.              |
+| Package                                                         | What it is                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [`@open-geocode/client`](packages/client)                       | The og client, and clients that speak the Google, Mapbox, HERE and Precisely APIs. No runtime dependencies. |
+| [`@open-geocode/autocomplete`](packages/autocomplete)           | `<og-autocomplete>`, a drop-in address and place autocomplete Web Component.                                |
+| [`@open-geocode/autocomplete-core`](packages/autocomplete-core) | The headless state, keyboard and ARIA logic under the Web Component, for a renderer of your own.            |
 
 All three run in browsers, Node, Bun and Deno.
 
@@ -15,81 +16,55 @@ All three run in browsers, Node, Bun and Deno.
 npm i @open-geocode/client
 ```
 
+### Switch an existing integration
+
+Choose the API your app already uses. The import chooses the request and response shape. Client configuration chooses the server.
+
+| Provider  | JavaScript import                | og HTTP prefix      |
+| --------- | -------------------------------- | ------------------- |
+| Google    | `@open-geocode/client/google`    | `/compat/google`    |
+| Mapbox    | `@open-geocode/client/mapbox`    | `/compat/mapbox`    |
+| HERE      | `@open-geocode/client/here`      | `/compat/here`      |
+| Precisely | `@open-geocode/client/precisely` | `/compat/precisely` |
+
+If you already call a supported API over HTTP, point your requests at its og prefix and use your deployment's authentication. You can keep an existing vendor SDK where that SDK can target og and uses a supported API version.
+
+If your app uses this package's Mapbox client, the switch is in its configuration:
+
+```diff
+ import { mapbox } from "@open-geocode/client/mapbox";
+
+-const client = mapbox({ accessToken });
++const client = mapbox({ baseUrl: "http://localhost:8080" });
+
+ const { features } = await client.geocoding.forward({ q: "1 Market Street, San Francisco, CA" });
+ console.log(features[0]?.properties.full_address);
+```
+
+The same pattern applies to Google, HERE and Precisely. With `baseUrl`, og answers using its Pack and the selected vendor's API shape. For a direct vendor call, configure that vendor's credentials. See the [workflow matrix and migration limits](packages/client/README.md#switch-an-existing-integration).
+
+### Start with og's native API
+
 ```ts
-import { createClient, OgError } from "@open-geocode/client";
+import { createClient } from "@open-geocode/client";
 
 const og = createClient({ baseUrl: "http://localhost:8080" });
-
-const result = await og.geocode({ q: "24 Sussex Drive, Ottawa", limit: 1 });
-const [lon, lat] = result.features[0]!.geometry.coordinates;
-
-try {
-  await og.geocode({ q: "" });
-} catch (error) {
-  if (error instanceof OgError) console.log(error.code, error.requestId);
-}
+const { features } = await og.geocode({ q: "10 King St W, Toronto", include: ["timezone"] });
+console.log(features[0]?.properties.label, features[0]?.geometry.coordinates);
 ```
 
-The client covers `geocode`, `reverse`, `autocomplete`, `places` and batch `jobs`.
-Pass `headers` to `createClient` when og sits behind your own gateway.
+The native client uses og's own response shape, with extras through `include`, batches and jobs. Importing a vendor subpath loads only that vendor client.
 
-### Retries and timeouts
+- **Typed from the source.**
+  The og client is typed from og's OpenAPI contract, and each vendor client from that vendor's documented API.
+- **One error.**
+  Every failure is a `GeocoderError` with a normalised `code` and the server's own error as `cause`.
+- **Shared plumbing.**
+  Retries with backoff, `AbortSignal` timeouts, request IDs and `.withResponse()` work the same for every client.
+- **Plugins.**
+  `failover` falls back to another client, `cache` answers repeats from memory inside each vendor's limits, and `compare` runs og beside your vendor on your real queries and reports the difference.
 
-Requests that fail with a connection error, a timeout, 408, 429 or a 5xx are retried twice by default, with exponential backoff that honours `retry-after`.
-`autocomplete` is never retried unless you ask, since a retried keystroke is already stale.
-`jobs.create` is never retried, since a retry could start the job twice.
-Requests time out after 60 seconds by default.
-
-```ts
-const og = createClient({ baseUrl: "http://localhost:8080", maxRetries: 4, timeout: 10_000 });
-await og.geocode({ q: "24 Sussex Drive" }, { maxRetries: 0, timeout: 2_000, signal });
-```
-
-### Errors
-
-Every error is an `OgError` with `status`, og's `code`, `requestId` and `headers`.
-Each status has its own subclass.
-
-| Status              | Error                                                                |
-| ------------------- | -------------------------------------------------------------------- |
-| 400                 | `BadRequestError`                                                    |
-| 401                 | `AuthenticationError`                                                |
-| 403                 | `PermissionDeniedError`                                              |
-| 404                 | `NotFoundError`                                                      |
-| 409                 | `ConflictError`                                                      |
-| 413                 | `PayloadTooLargeError`                                               |
-| 422                 | `UnprocessableEntityError`                                           |
-| 429                 | `RateLimitError`                                                     |
-| 5xx                 | `InternalServerError`                                                |
-| no answer           | `APIConnectionError`, or `APIConnectionTimeoutError` after `timeout` |
-| your `signal` fired | `APIUserAbortError`                                                  |
-
-### Request IDs and raw responses
-
-Every parsed object carries og's request ID as `_request_id`.
-`.withResponse()` returns the data with the raw `Response`, and `.asResponse()` returns the `Response` with its body unread.
-
-```ts
-const result = await og.geocode({ q: "24 Sussex Drive" });
-console.log(result._request_id);
-
-const { data, response } = await og.geocode({ q: "24 Sussex Drive" }).withResponse();
-console.log(response.headers.get("x-request-id"));
-```
-
-### Batch jobs
-
-```ts
-const job = await og.jobs.create({ csv }, { address: "address" }, { output: "jsonl" });
-await og.jobs.wait(job.id);
-for await (const line of og.jobs.lines(job.id)) console.log(JSON.parse(line));
-```
-
-`jobs.lines` streams results as og writes them, so it also works while the job is still running.
-
-### Logging
-
-Set `logLevel` to `"debug"`, `"info"`, `"warn"` (the default), `"error"` or `"off"`, and pass `logger` to send logs somewhere other than `console`.
+The [client README](packages/client/README.md) documents every client, method, extra and error code.
 
 ## Autocomplete
 
@@ -119,26 +94,46 @@ Then use the element anywhere, in plain HTML, React, Vue or any other framework:
 ></og-autocomplete>
 <script>
   document.querySelector("og-autocomplete").addEventListener("og-select", (event) => {
-    console.log(event.detail.properties.label, event.detail.geometry.coordinates);
+    console.log(event.detail.label, event.detail.location);
   });
 </script>
 ```
 
+`base-url` points the element at an og server.
+For a vendor client, give it a source.
+
+```ts
+import "@open-geocode/autocomplete";
+import { mapboxSource } from "@open-geocode/autocomplete-core";
+import { mapbox } from "@open-geocode/client/mapbox";
+
+document.querySelector("og-autocomplete").source = mapboxSource(mapbox({ accessToken }));
+```
+
+There is `ogSource`, `googleSource`, `mapboxSource`, `hereSource` and `preciselySource`, one for each client's own autocomplete method.
+`og-select` carries the chosen suggestion with its `label`, its `location` and the server's own object in `raw`.
+Some APIs suggest without coordinates and bill a search by session.
+The sources handle both.
+They keep one session per search, and fetch the coordinates of the suggestion the user picks.
+
 | Attribute     | Default | Meaning                                                            |
 | ------------- | ------- | ------------------------------------------------------------------ |
-| `base-url`    | none    | Where og runs. Required.                                           |
+| `base-url`    | none    | Where og runs. Not needed when the `source` property is set.       |
 | `placeholder` | none    | Input placeholder.                                                 |
 | `limit`       | `5`     | Suggestions shown.                                                 |
 | `country`     | none    | Comma-separated ISO 3166-1 alpha-2 codes to limit results to.      |
-| `layer`       | none    | Only this og layer, for example `address` or `poi`.                |
-| `focus`       | none    | `lon,lat` to prefer nearby results between equally good matches.   |
-| `debounce`    | `150`   | Milliseconds to wait after a keystroke before asking og.           |
+| `layer`       | none    | The one og layer to suggest from, for example `address`.           |
+| `focus`       | none    | `lon,lat` to prefer nearby results.                                |
+| `bbox`        | none    | `min_lon,min_lat,max_lon,max_lat` to limit results to.             |
+| `lang`        | none    | Comma-separated language codes to name results in.                 |
+| `debounce`    | `150`   | Milliseconds to wait after a keystroke before asking.              |
 | `min-chars`   | `2`     | Characters typed before the first request.                         |
 | `name`        | none    | Form field name. Inside a `<form>`, the chosen label is submitted. |
 
 Style it with `::part(input)`, `::part(list)` and `::part(option)`.
 While a search is slow, the element gets a `stalled` attribute, so `og-autocomplete[stalled]` can show a spinner.
-It fires `og-error` when og fails.
+It fires `og-error` when the server fails.
+The attributes from `limit` to `lang` are og's own parameters, so they apply to `base-url` only, and a source carries its own.
 It follows the ARIA combobox pattern and works with the arrow keys, Enter and Escape.
 
 ## Headless core
@@ -147,14 +142,13 @@ It follows the ARIA combobox pattern and works with the arrow keys, Enter and Es
 It hands your component the state and the attributes, and your component forwards input events.
 
 ```ts
-import { createAutocomplete } from "@open-geocode/autocomplete-core";
+import { createAutocomplete, ogSource } from "@open-geocode/autocomplete-core";
 import { createClient } from "@open-geocode/client";
-import { ogItems } from "@open-geocode/autocomplete";
 
+const source = ogSource(createClient({ baseUrl: "http://localhost:8080" }), { country: "CA" });
 const ac = createAutocomplete({
-  getItems: ogItems(createClient({ baseUrl: "http://localhost:8080" }), { country: "CA" }),
-  getItemLabel: (item) => item.properties.label,
-  onSelect: (item) => console.log(item.geometry.coordinates),
+  ...source,
+  onSelect: async (item) => console.log((await source.resolve(item)).location),
 });
 
 ac.subscribe((state) => render(state)); // state.items, state.activeIndex, state.isOpen, state.status
@@ -163,6 +157,10 @@ input.addEventListener("keydown", (event) => ac.onKeyDown(event.key) && event.pr
 Object.entries(ac.getInputAttributes()).forEach(([name, value]) => input.setAttribute(name, value));
 ```
 
+Each source takes its client and that client's own autocomplete parameters.
+`source.resolve` returns the picked suggestion with its coordinates, looking them up for an API that suggests without them.
+The package has no dependencies, and `getItems` can be any function of your own instead.
+
 `status` becomes `stalled` only after `stallThreshold` (300 ms), so a spinner never flashes on fast answers.
 
 ## Development
@@ -170,15 +168,37 @@ Object.entries(ac.getInputAttributes()).forEach(([name, value]) => input.setAttr
 ```sh
 bun install
 bun run build
-bun run test           # client unit tests
+bun run test           # unit and fixture tests of the clients and the headless core
 bun run test:browser   # widget tests in Chromium, Firefox and WebKit
-OG_URL=http://127.0.0.1:8080 bun run test   # also run the live og test
 bun run check:packages # publint and are-the-types-wrong
-bun run size           # size budget
+bun run size           # size budgets of every client and plugin
 bun run docs           # API reference into docs/
-bun run test:ecosystem # build a real Vite app against the packages
-bun run gen            # regenerate client types from og's contract
+bun run docs:page      # the local docs page, into docs-preview/
+bun run test:ecosystem # build a real Vite app, check a client pulls in no other vendor, and run under Node, Bun and Deno
+bun run gen            # regenerate og's types from the pinned OG revision's OpenAPI contract
 ```
+
+Each vendor client is tested twice.
+One suite replays responses in the vendor's documented shape, kept under `packages/client/test/fixtures`.
+The fixtures are synthetic, with every value made up, except Google's, which are documentation examples credited in `packages/client/test/fixtures/google/NOTICE.md`.
+The other suite calls a real og server's `/compat` routes, and runs when you point it at one.
+
+Hosted SDK CI runs the fixture, package, runtime and browser checks. The live
+suite uses an existing Monaco Pack for endpoint contracts and an existing USA
+Pack for the National Address Database smoke test. The USA sample covers eight
+states, with clean and messy forms for each address. It checks the top result
+against the published point. See the [fixture source](ecosystem-tests/og/NOTICE.md).
+
+Run both against an OG binary that exposes the compatibility routes:
+
+```sh
+ecosystem-tests/og/serve.sh /path/to/open-geocode /path/to/monaco-pack /path/to/usa-pack .og-test
+```
+
+To test servers you already have running, set `OG_URL` for Monaco and
+`OG_USA_URL` for the USA. Set `OG_TEST_ADDRESS="12 Boulevard des Moulins Monaco"`
+when using the Monaco Pack. The HERE webhook cases need the server started with
+`--hook-host 127.0.0.1`.
 
 `examples/plain-html` shows the widget on a checkout form.
 

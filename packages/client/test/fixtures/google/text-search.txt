@@ -1,0 +1,21 @@
+{
+  "places": [
+    {
+      "formattedAddress": "367 Pitt St, Sydney NSW 2000, Australia",
+      "priceLevel": "PRICE_LEVEL_MODERATE",
+      "displayName": {
+        "text": "Mother Chu's Vegetarian Kitchen",
+        "languageCode": "en"
+      }
+    },
+    {
+      "formattedAddress": "115 King St, Newtown NSW 2042, Australia",
+      "priceLevel": "PRICE_LEVEL_MODERATE",
+      "displayName": {
+        "text": "Green Mushroom",
+        "languageCode": "en"
+      }
+    },
+    ...
+  ]
+}

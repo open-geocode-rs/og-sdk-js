@@ -1,0 +1,194 @@
+{
+  "responses": [
+    {
+      "addressId": "1",
+      "status": "OK",
+      "results": [
+        {
+          "score": 93,
+          "address": {
+            "formattedAddress": "4820 KESTREL BLVD STE 210, HARROWMERE OH 43917-6042, United States",
+            "formattedStreetAddress": "4820 KESTREL BLVD STE 210",
+            "formattedLocationAddress": "HARROWMERE, OH  43917-6042",
+            "unitType": "STE",
+            "addressNumber": "4820",
+            "country": {
+              "name": "United States",
+              "isoAlpha2Code": "US",
+              "isoAlpha3Code": "USA",
+              "isoNumericCode": "840"
+            },
+            "admin1": {
+              "longName": "Ohio",
+              "shortName": "OH"
+            },
+            "admin2": {
+              "longName": "VELLACOTT COUNTY",
+              "shortName": "VELLACOTT COUNTY"
+            },
+            "city": {
+              "longName": "HARROWMERE",
+              "shortName": "HARROWMERE"
+            },
+            "postalCode": "43917",
+            "postalCodeExt": "6042",
+            "street": "KESTREL",
+            "unit": "210"
+          },
+          "addressLines": [
+            "4820 KESTREL BLVD STE 210",
+            "HARROWMERE OH 43917-6042",
+            "United States"
+          ],
+          "explanation": {
+            "addressMatch": {
+              "type": "ADDRESS",
+              "description": [
+                {
+                  "label": "placeName",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "addressNumber",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "admin1",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "admin2",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "city",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "neighborhood",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "suburb",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "street",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "postalCode",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "streetType",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "postalCodeExt",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "streetDirectional",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "unitMatch",
+                  "matchType": "NONE"
+                }
+              ]
+            },
+            "source": {
+              "label": "ggs"
+            }
+          },
+          "customFields": {
+            "RESBUS": "B",
+            "POBOX_ZONE": "N",
+            "LOTSIZE_METERS": "20316",
+            "CSA_NUMBER": "517",
+            "TYPE_SHORT": "BLVD",
+            "THOROUGHFARE_TYPE": "BLVD",
+            "HIUNIT": "210",
+            "PARCEN_ELEVATION_METERS": "268.2",
+            "ROAD_CLASS": "03",
+            "MATCH_CODE": "S702",
+            "COUNTY": "39917",
+            "PB_KEY": "P0000T7KQ2WX",
+            "LANGUAGE": "en",
+            "UNIT_TYPE": "STE",
+            "ADDRTYPE": "M",
+            "INC_IND": "N",
+            "BLOCK_2010": "399170418003027",
+            "NON_DELIVERABLE": "N",
+            "POINT_ID": "274610583",
+            "CHECK_DIGIT": "2",
+            "METRO_FLAG": "Y",
+            "BLOCK": "399170418021009",
+            "POST_THOROUGHFARE_TYPE": "BLVD",
+            "QCITY": "399406100",
+            "ZIP_FACILITY": "P",
+            "TFID": "641207935",
+            "UNIT_RANGE_PARITY": "E",
+            "APN_ID": "HARR M:000113 P:000207",
+            "LOT_CODE": "A",
+            "LOT_NUM": "0346",
+            "CTYST_KEY": "X48213",
+            "UACEPOP": "1206358",
+            "NAME": "KESTREL",
+            "ZIP_CARRTSORT": "D",
+            "PARENT_ID": "P0000T7KR9D4",
+            "LORANGE": "4820",
+            "CLOSE_MATCH": "T",
+            "ZIP_VALID": "Y",
+            "STREET_SIDE": "R",
+            "DATATYPE": "11",
+            "INTERSECTION": "F",
+            "ZIP_CITY_DELV": "Y",
+            "LOUNIT": "210",
+            "LOC_CODE": "AP02",
+            "CART": "C041",
+            "NAME_CITY": "HARROWMERE",
+            "BLOCK_LEFT": "399170418021009",
+            "COUNTY_FIPS": "39917",
+            "PRECISION_LEVEL": "17",
+            "HIRANGE": "4820",
+            "UACE": "36154",
+            "REC_TYPE": "H",
+            "HI_RISE_DFLT": "N",
+            "URBANICITY": "L",
+            "RESOLVED_LINE": "0",
+            "MATCH_TYPE": "ADDRESS",
+            "PARCEN_ELEVATION": "880",
+            "PREF_CITY": "HARROWMERE",
+            "CBSA_NUMBER": "27815",
+            "ALT_FLAG": "B",
+            "SEGMENT_DIRECTION": "F",
+            "ADDRLINE_SHORT": "4820 KESTREL BLVD STE 210",
+            "LOTSIZE": "218680",
+            "CONFIDENCE": "84",
+            "HIZIP4": "6042",
+            "DATATYPE_NAME": "ADDRESS POINT SET",
+            "ORIG_DPBC": "10",
+            "SEGMENT_PARITY": "L",
+            "CBSA_DIVISION_NAME": "HARROWMERE-VELLACOTT, OH METROPOLITAN DIVISION",
+            "LOZIP4": "6042",
+            "CSA_NAME": "HARROWMERE-QUILLBROOK-TANSLEY, OH COMBINED STATISTICAL AREA",
+            "DPBC": "10",
+            "LASTLINE_SHORT": "HARROWMERE, OH  43917-6042",
+            "PLACE": "3934420",
+            "CITY_SHORT": "HARROWMERE",
+            "NAME_SHORT": "KESTREL",
+            "ZIP9": "439176042",
+            "IS_ALIAS": "N04",
+            "PRECISION_CODE": "S5HPN-SCZA",
+            "ZIP10": "43917-6042",
+            "CBSA_NAME": "HARROWMERE-QUILLBROOK, OH METROPOLITAN STATISTICAL AREA",
+            "RANGE_PARITY": "E",
+            "CBSA_DIVISION_NUMBER": "27834"
+          }
+        }
+      ]
+    }
+  ]
+}

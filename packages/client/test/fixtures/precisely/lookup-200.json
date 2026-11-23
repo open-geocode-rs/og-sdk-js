@@ -1,0 +1,189 @@
+{
+  "responses": [
+    {
+      "status": "OK",
+      "results": [
+        {
+          "score": 0,
+          "address": {
+            "formattedAddress": "9 TALLOWFIELD CT, QUILLFIELD CO 81194-3406, United States",
+            "formattedStreetAddress": "9 TALLOWFIELD CT",
+            "formattedLocationAddress": "QUILLFIELD, CO  81194-3406",
+            "addressNumber": "9",
+            "country": {
+              "name": "United States",
+              "isoAlpha2Code": "US",
+              "isoAlpha3Code": "USA",
+              "isoNumericCode": "840"
+            },
+            "admin1": {
+              "longName": "Colorado",
+              "shortName": "CO"
+            },
+            "admin2": {
+              "longName": "MARROWDALE COUNTY",
+              "shortName": "MARROWDALE COUNTY"
+            },
+            "city": {
+              "longName": "QUILLFIELD",
+              "shortName": "QUILLFIELD"
+            },
+            "postalCode": "81194",
+            "postalCodeExt": "3406",
+            "street": "TALLOWFIELD"
+          },
+          "addressLines": [
+            "9 TALLOWFIELD CT",
+            "QUILLFIELD CO 81194-3406",
+            "United States"
+          ],
+          "location": {
+            "explanation": {
+              "type": "ADDRESS_POINT",
+              "description": "BUILDING",
+              "designation": "CENTROID"
+            },
+            "feature": {
+              "type": "Feature",
+              "properties": {
+                "crsName": "epsg:4326"
+              },
+              "geometry": {
+                "type": "Point",
+                "coordinates": [
+                  -105.318274,
+                  39.526618
+                ]
+              }
+            }
+          },
+          "explanation": {
+            "addressMatch": {
+              "description": [
+                {
+                  "label": "placeName",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "addressNumber",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "admin1",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "admin2",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "city",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "neighborhood",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "suburb",
+                  "matchType": "NONE"
+                },
+                {
+                  "label": "street",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "postalCode",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "streetType",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "postalCodeExt",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "streetDirectional",
+                  "matchType": "EXACT"
+                },
+                {
+                  "label": "unitMatch",
+                  "matchType": "EXACT"
+                }
+              ]
+            },
+            "source": {
+              "label": "ggs"
+            }
+          },
+          "customFields": {
+            "POBOX_ZONE": "N",
+            "CSA_NUMBER": "236",
+            "TYPE_SHORT": "CT",
+            "THOROUGHFARE_TYPE": "CT",
+            "ROAD_CLASS": "04",
+            "MATCH_CODE": "K000",
+            "COUNTY": "08913",
+            "PB_KEY": "P0000W5HN83C",
+            "LANGUAGE": "en",
+            "NON_DELIVERABLE": "N",
+            "POINT_ID": "318425076",
+            "CHECK_DIGIT": "4",
+            "METRO_FLAG": "Y",
+            "BLOCK": "089130217042015",
+            "POST_THOROUGHFARE_TYPE": "CT",
+            "QCITY": "089563200",
+            "ZIP_FACILITY": "P",
+            "LOT_CODE": "A",
+            "LOT_NUM": "0079",
+            "GEOHASH": "9xj5smq2r8wt",
+            "CTYST_KEY": "Z30687",
+            "NAME": "TALLOWFIELD",
+            "ZIP_CARRTSORT": "D",
+            "LORANGE": "9",
+            "CLOSE_MATCH": "T",
+            "ZIP_VALID": "Y",
+            "STREET_SIDE": "R",
+            "DATATYPE": "11",
+            "INTERSECTION": "F",
+            "ZIP_CITY_DELV": "Y",
+            "LOC_CODE": "AP02",
+            "GLOBAL_LOCATION_CODE": "418",
+            "CART": "C057",
+            "NAME_CITY": "QUILLFIELD",
+            "BLOCK_LEFT": "089130217042015",
+            "COUNTY_FIPS": "08913",
+            "PRECISION_LEVEL": "17",
+            "HIRANGE": "9",
+            "REC_TYPE": "S",
+            "RESOLVED_LINE": "0",
+            "PREF_CITY": "QUILLFIELD",
+            "CBSA_NUMBER": "31790",
+            "ALT_FLAG": "B",
+            "SEGMENT_DIRECTION": "F",
+            "ADDRLINE_SHORT": "9 TALLOWFIELD CT",
+            "CONFIDENCE": "91",
+            "HIZIP4": "3406",
+            "DATATYPE_NAME": "ADDRESS POINT SET",
+            "ORIG_DPBC": "09",
+            "SEGMENT_PARITY": "R",
+            "LOZIP4": "3406",
+            "CSA_NAME": "QUILLFIELD-MARROWDALE, CO COMBINED STATISTICAL AREA",
+            "DPBC": "09",
+            "LASTLINE_SHORT": "QUILLFIELD, CO  81194-3406",
+            "CITY_SHORT": "QUILLFIELD",
+            "NAME_SHORT": "TALLOWFIELD",
+            "ZIP9": "811943406",
+            "IS_ALIAS": "N04",
+            "PRECISION_CODE": "S5H------Z",
+            "ZIP10": "81194-3406",
+            "CBSA_NAME": "QUILLFIELD-MARROWDALE-ASHWICK, CO METROPOLITAN STATISTICAL AREA",
+            "RANGE_PARITY": "O"
+          }
+        }
+      ]
+    }
+  ]
+}

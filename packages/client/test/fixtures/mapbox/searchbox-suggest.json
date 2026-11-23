@@ -1,0 +1,62 @@
+{
+  "suggestions": [
+    {
+      "name": "Calloway Lantern Museum",
+      "name_local": {
+        "en": "Calloway Lantern Museum"
+      },
+      "mapbox_id": "dXJuOm1ieHBvaTo2YTQwZDJmOS1iODcxLTRlM2MtOGQwNS1jMmY3OTEzYWU2YjA",
+      "feature_type": "poi",
+      "address": "58 Foundry Passage",
+      "full_address": "58 Foundry Passage, Dunster Falls, Wisconsin 53962, United States",
+      "place_formatted": "Dunster Falls, Wisconsin 53962, United States",
+      "context": {
+        "country": {
+          "name": "United States",
+          "country_code": "US",
+          "country_code_alpha_3": "USA"
+        },
+        "region": {
+          "name": "Wisconsin",
+          "region_code": "WI",
+          "region_code_full": "US-WI"
+        },
+        "postcode": {
+          "id": "dXJuOm1ieHBsYzpQekRmMkE",
+          "name": "53962"
+        },
+        "place": {
+          "id": "dXJuOm1ieHBsYzpEc0ZsOFE",
+          "name": "Dunster Falls"
+        },
+        "neighborhood": {
+          "id": "dXJuOm1ieHBsYzpHd0tzNHc",
+          "name": "Glassworks"
+        },
+        "address": {
+          "name": "58 Foundry Passage",
+          "address_number": "58",
+          "street_name": "Foundry Passage"
+        },
+        "street": {
+          "name": "Foundry Passage"
+        }
+      },
+      "language": "en",
+      "maki": "museum",
+      "poi_category": [
+        "museum",
+        "tourist attraction"
+      ],
+      "poi_category_ids": [
+        "museum",
+        "tourist_attraction"
+      ],
+      "external_ids": {
+        "provider": "prv-2b80e6a59c"
+      },
+      "metadata": {}
+    }
+  ],
+  "attribution": "© 2025 Mapbox and its suppliers. This is a synthetic test response in the documented shape. (https://www.mapbox.com/about/maps/)"
+}

@@ -1,0 +1,20 @@
+{
+  "listItems": [
+    {
+      "canonical_id": "lantern_shop",
+      "icon": "shop",
+      "name": "Lantern Shop",
+      "version": "7:3f1c9a0d5b7e4c2a8d6f0b1e2a3c4d5e6f708192",
+      "uuid": "5b0e7c1a-2d43-4f6a-9b8c-1e2f3a4b5c6d"
+    },
+    {
+      "canonical_id": "tea_house",
+      "icon": "cafe",
+      "name": "Tea House",
+      "version": "7:3f1c9a0d5b7e4c2a8d6f0b1e2a3c4d5e6f708192",
+      "uuid": "c4d21f90-8a7b-4e15-b3c2-0f9e8d7c6b5a"
+    }
+  ],
+  "attribution": "Synthetic test data. Not a real response.",
+  "version": "7:3f1c9a0d5b7e4c2a8d6f0b1e2a3c4d5e6f708192"
+}

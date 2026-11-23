@@ -1,0 +1,22 @@
+{
+  "id": "JOB-a05d82f7-1c36-4e9b-8d40-f7b29c6e1a35",
+  "serviceHrn": "hrn:here:service::olp-here:search-geocode-7",
+  "billingTags": [],
+  "status": "completed",
+  "href": "https://batch.search.hereapi.com/v7/batch/jobs/JOB-a05d82f7-1c36-4e9b-8d40-f7b29c6e1a35",
+  "created": "2026-03-11T09:14:52.418305Z",
+  "started": "2026-03-11T09:16:07.930162Z",
+  "ended": "2026-03-11T09:16:39.275841Z",
+  "records": {
+    "total": 7,
+    "valid": 7,
+    "invalid": 0,
+    "processed": 7,
+    "pending": 0,
+    "succeeded": 7,
+    "failed": 0
+  },
+  "resultsHref": "https://batch.search.hereapi.com/v7/batch/jobs/JOB-a05d82f7-1c36-4e9b-8d40-f7b29c6e1a35/results",
+  "errorsHref": "",
+  "outputType": "csv"
+}

@@ -7,7 +7,7 @@
   ],
   "type": "module",
   "scripts": {
-    "gen": "openapi-typescript https://raw.githubusercontent.com/open-geocode-rs/open-geocode/main/contract/openapi.json -o packages/client/src/schema.gen.ts",
+    "gen": "openapi-typescript https://raw.githubusercontent.com/open-geocode-rs/open-geocode/4eac3e5091d141596ff70a930a1731010fc8d408/contract/openapi.json -o packages/client/src/schema.gen.ts",
     "build": "bun run --filter '@open-geocode/client' build && bun run --filter '@open-geocode/autocomplete-core' build && bun run --filter '@open-geocode/autocomplete' build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint",
@@ -20,11 +20,13 @@
     "check:packages": "for p in packages/*; do bunx publint $p --strict && bunx attw --pack $p --profile esm-only || exit 1; done",
     "size": "size-limit",
     "docs": "typedoc",
-    "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn"
+    "test:ecosystem": "cd ecosystem-tests/vite && vite build --logLevel warn && cd ../treeshake && node check.mjs && cd ../runtimes && node smoke.mjs && bun smoke.mjs && bunx deno run --allow-read --allow-env --allow-net=127.0.0.1 smoke.mjs",
+    "docs:page": "bun packages/client/scripts/docs-page.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@changesets/cli": "^3.0.3",
+    "@mapbox/mapbox-sdk": "0.16.2",
     "@size-limit/preset-small-lib": "^14.3.0",
     "@types/node": "^26.6.6",
     "@vitest/browser-playwright": "^5.1.0",
@@ -43,21 +45,57 @@
   },
   "size-limit": [
     {
-      "name": "@open-geocode/client",
+      "name": "the og client",
       "path": "packages/client/dist/index.js",
       "import": "{ createClient }",
-      "limit": "3 kB"
+      "limit": "4.3 kB"
+    },
+    {
+      "name": "the google client",
+      "path": "packages/client/dist/google.js",
+      "import": "{ google }",
+      "limit": "4.5 kB"
+    },
+    {
+      "name": "the mapbox client",
+      "path": "packages/client/dist/mapbox.js",
+      "import": "{ mapbox }",
+      "limit": "4 kB"
+    },
+    {
+      "name": "the here client",
+      "path": "packages/client/dist/here.js",
+      "import": "{ here }",
+      "limit": "5 kB"
+    },
+    {
+      "name": "the precisely client",
+      "path": "packages/client/dist/precisely.js",
+      "import": "{ precisely }",
+      "limit": "5 kB"
+    },
+    {
+      "name": "failover, cache and compare",
+      "path": "packages/client/dist/plugins.js",
+      "import": "{ cache, compare, failover }",
+      "limit": "2.7 kB"
     },
     {
       "name": "@open-geocode/autocomplete-core",
       "path": "packages/autocomplete-core/dist/index.js",
       "import": "{ createAutocomplete }",
-      "limit": "1.5 kB"
+      "limit": "1 kB"
+    },
+    {
+      "name": "@open-geocode/autocomplete-core with ogSource",
+      "path": "packages/autocomplete-core/dist/index.js",
+      "import": "{ createAutocomplete, ogSource }",
+      "limit": "1.2 kB"
     },
     {
       "name": "@open-geocode/autocomplete (CDN file)",
       "path": "packages/autocomplete/dist/og-autocomplete.iife.js",
-      "limit": "6 kB"
+      "limit": "7 kB"
     }
   ]
 }

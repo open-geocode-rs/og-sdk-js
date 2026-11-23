@@ -1,0 +1,72 @@
+  {
+    "suggestions": [
+      {
+        "placePrediction": {
+          "place": "places/ChIJkQQVTZqAhYARHxPt2iJkm1Q",
+          "placeId": "ChIJkQQVTZqAhYARHxPt2iJkm1Q",
+          "text": {
+            "text": "Asian Art Museum, Larkin Street, San Francisco, CA, USA",
+            "matches": [
+              {
+                "startOffset": 6,
+                "endOffset": 16
+              }
+            ]
+          },
+          "structuredFormat": {
+            "mainText": {
+              "text": "Asian Art Museum",
+              "matches": [
+                {
+                  "startOffset": 6,
+                  "endOffset": 16
+                }
+              ]
+            },
+            "secondaryText": {
+              "text": "Larkin Street, San Francisco, CA, USA"
+            }
+          },
+          "types": [
+            "establishment",
+            "museum",
+            "point_of_interest"
+          ]
+        }
+      },
+      {
+        "placePrediction": {
+          "place": "places/ChIJI7NivpmAhYARSuRPlbbn_2w",
+          "placeId": "ChIJI7NivpmAhYARSuRPlbbn_2w",
+          "text": {
+            "text": "de Young Museum, Hagiwara Tea Garden Drive, San Francisco, CA, USA",
+            "matches": [
+              {
+                "endOffset": 15
+              }
+            ]
+          },
+          "structuredFormat": {
+            "mainText": {
+              "text": "de Young Museum",
+              "matches": [
+                {
+                  "endOffset": 15
+                }
+              ]
+            },
+            "secondaryText": {
+              "text": "Hagiwara Tea Garden Drive, San Francisco, CA, USA"
+            }
+          },
+          "types": [
+            "establishment",
+            "point_of_interest",
+            "tourist_attraction",
+            "museum"
+          ]
+        }
+      },
+      /.../
+    ]
+  }

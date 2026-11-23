@@ -1,0 +1,12 @@
+{
+  "id": "JOB-3e7c41d9-62ab-4f05-9b18-c0d5a7e2f643",
+  "serviceHrn": "hrn:here:service::olp-here:search-revgeocode-7",
+  "tag": "og-fixture-reverse-run",
+  "billingTags": [
+    "ogFixtureTagA",
+    "ogFixtureTagB",
+    "ogFixtureTagC"
+  ],
+  "status": "submitted",
+  "href": "https://batch.search.hereapi.com/v7/batch/jobs/JOB-3e7c41d9-62ab-4f05-9b18-c0d5a7e2f643"
+}

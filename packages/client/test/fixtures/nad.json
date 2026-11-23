@@ -1,0 +1,58 @@
+[
+  {
+    "state": "AK",
+    "full": "15936 Shims Street, Eagle River, AK 99577, United States of America",
+    "messy": "15936 Shims St, Eagle River",
+    "lat": 61.3644884,
+    "lon": -149.5427973
+  },
+  {
+    "state": "CA",
+    "full": "179 El Pajaro, Newbury Park, CA 91320, United States of America",
+    "messy": "179 El Pajaro, Newbury Park",
+    "lat": 34.1950983,
+    "lon": -118.9604097
+  },
+  {
+    "state": "NC",
+    "full": "238 Beaver Drive, Dudley, NC 28333, United States of America",
+    "messy": "238 Beaver Dr, Dudley",
+    "lat": 35.3014537,
+    "lon": -78.0051649
+  },
+  {
+    "state": "NY",
+    "full": "149 Levittown Parkway, Hicksville, NY 11801, United States of America",
+    "messy": "149 Levittown Parkway, Hicksville",
+    "lat": 40.7537306,
+    "lon": -73.5417411
+  },
+  {
+    "state": "OR",
+    "full": "2220 Northwest 12th Street, Corvallis, OR 97330, United States of America",
+    "messy": "2220 NW 12th St, Corvallis",
+    "lat": 44.590308,
+    "lon": -123.2650548
+  },
+  {
+    "state": "TX",
+    "full": "710 Valiant Circle, Garland, TX 75043, United States of America",
+    "messy": "710 Valiant Cl, Garland",
+    "lat": 32.860534,
+    "lon": -96.6381631
+  },
+  {
+    "state": "WI",
+    "full": "401 Charmany Drive, Madison, WI 53719, United States of America",
+    "messy": "401 Charmany Dr, Madison",
+    "lat": 43.0601083,
+    "lon": -89.477041
+  },
+  {
+    "state": "WV",
+    "full": "568 Norwood Road, Huntington, WV 25705, United States of America",
+    "messy": "568 Norwood Rd, Huntington",
+    "lat": 38.3941281,
+    "lon": -82.3827243
+  }
+]

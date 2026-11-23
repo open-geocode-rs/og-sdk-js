@@ -3,7 +3,6 @@ import {
   APIConnectionTimeoutError,
   APIUserAbortError,
   OgError,
-  type Problem,
 } from "./errors.ts";
 
 /** How much the client logs. */
@@ -21,7 +20,7 @@ export interface Logger {
 export interface RequestOptions {
   /** Cancels the request, for example when the user types the next letter. */
   signal?: AbortSignal | undefined;
-  /** Milliseconds before the request fails with `APIConnectionTimeoutError`. */
+  /** Milliseconds before the request fails with `APIConnectionTimeoutError`. `Infinity` or `0` sets no limit. */
   timeout?: number | undefined;
   /** Times a failed request is retried. */
   maxRetries?: number | undefined;
@@ -29,12 +28,34 @@ export interface RequestOptions {
   headers?: Record<string, string> | undefined;
 }
 
-/** A parsed response together with the raw `Response`. */
-export interface WithResponse<T> {
-  data: T;
-  response: Response;
-  requestId: string | undefined;
+/** The API a client speaks. Its methods, requests and responses are that API's own. */
+export type Shape = "og" | "google" | "mapbox" | "here" | "precisely";
+
+/**
+ * How long an answer may be kept.
+ * A cache never keeps an answer longer than the server that gave it allows.
+ */
+export interface CacheRule {
+  /** Milliseconds the answer may be kept. `0` means never, and `Infinity` means there is no limit. */
+  maxTtl: number;
 }
+
+/** What a call gives back besides its data. */
+export interface Outcome<T = unknown> {
+  /** The parsed body, in the shape of the API the client speaks. */
+  data: T;
+  /** The raw `Response`, its body already read. Absent when a plugin answered without a request. */
+  response: Response | undefined;
+  /** The ID the server logged the request under. */
+  requestId: string | undefined;
+  /** The server that answered. It is `og` for any client that points at an og server. */
+  server: Shape;
+  /** How long this answer may be kept. */
+  cache: CacheRule;
+}
+
+/** The same as {@link Outcome}, under the name `withResponse()` is known by. */
+export type WithResponse<T> = Outcome<T>;
 
 const LEVELS: Record<LogLevel, number> = { off: 0, error: 1, warn: 2, info: 3, debug: 4 };
 
@@ -42,6 +63,12 @@ const LEVELS: Record<LogLevel, number> = { off: 0, error: 1, warn: 2, info: 3, d
 const RETRY_STATUSES = new Set([408, 429]);
 
 export interface TransportOptions {
+  /** The provider's name, used in log lines and error messages. Default `og`. */
+  name?: string | undefined;
+  /** Reads a message out of the provider's error body. */
+  describeError?: ((body: unknown, status: number) => string | undefined) | undefined;
+  /** Response headers that may hold the provider's request ID, in order of preference. Default `x-request-id`. */
+  requestIdHeaders?: readonly string[] | undefined;
   baseUrl: string;
   headers: Record<string, string>;
   fetch: typeof globalThis.fetch;
@@ -52,38 +79,138 @@ export interface TransportOptions {
 }
 
 export interface Call {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  /** A path under the transport's `baseUrl`, or an absolute URL. */
   path: string;
-  query?: Record<string, unknown>;
-  body?: string;
+  query?: Record<string, unknown> | URLSearchParams;
+  body?: BodyInit;
   headers?: Record<string, string>;
+  /** `true` to send none of the client's own headers, for a URL that carries its own credential. */
+  bare?: boolean | undefined;
   /** Whether a retry can repeat the call safely. Job creation cannot. */
   idempotent: boolean;
   options: RequestOptions | undefined;
 }
 
-function toSearch(query: Record<string, unknown> | undefined): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === null) continue;
-    search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+function toSearch(query: Record<string, unknown> | URLSearchParams | undefined): string {
+  let search: URLSearchParams;
+  if (query instanceof URLSearchParams) search = query;
+  else {
+    search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value === undefined || value === null) continue;
+      search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+    }
   }
   const text = search.toString();
   return text === "" ? "" : `?${text}`;
 }
 
-const sleep = (ms: number, signal: AbortSignal | undefined): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new APIUserAbortError("Request was aborted."));
-      },
-      { once: true },
+/** The signals one request runs under, kept so a failure can be read by which of them fired. */
+interface Watch {
+  /** What `fetch` is given. Absent when there is neither a caller's signal nor a timeout. */
+  signal: AbortSignal | undefined;
+  caller: AbortSignal | undefined;
+  /** The transport's own timeout. */
+  timer: AbortSignal | undefined;
+  timeout: number;
+  provider: string;
+}
+
+/** A response's signals outlive `send`, since they also end the reading of its body. */
+const watches = new WeakMap<Response, Watch>();
+
+function watch(caller: AbortSignal | undefined, timeout: number, provider: string): Watch {
+  const timer = Number.isFinite(timeout) && timeout > 0 ? AbortSignal.timeout(timeout) : undefined;
+  const parts = [caller, timer].filter((part) => part !== undefined);
+  return {
+    signal: parts.length === 2 ? AbortSignal.any(parts) : parts[0],
+    caller,
+    timer,
+    timeout,
+    provider,
+  };
+}
+
+const nameOf = (reason: unknown): string | undefined =>
+  reason !== null && typeof reason === "object" ? (reason as { name?: string }).name : undefined;
+
+/**
+ * The transport error for a request its signals ended, or `undefined` when none of them fired.
+ * Which signal fired decides, never the name of what was thrown alone, since a runtime may
+ * throw an `AbortError` for a timeout.
+ */
+function ended(watched: Watch, thrown?: unknown): OgError | undefined {
+  const { signal, timer, caller, provider } = watched;
+  if (!signal?.aborted) return undefined;
+  // The DOMException is the cause. A runtime may throw something else, and then the signal holds it.
+  const cause = nameOf(thrown) === nameOf(signal.reason) ? thrown : signal.reason;
+  // With both fired, the signal given to fetch carries the reason of the one that fired first.
+  if (timer?.aborted && signal.reason === timer.reason)
+    return new APIConnectionTimeoutError(
+      `${provider} did not answer within ${watched.timeout} ms.`,
+      { cause, provider },
     );
+  // A caller may pass a timeout signal of its own, which is a timeout all the same.
+  return nameOf(caller?.reason) === "TimeoutError"
+    ? new APIConnectionTimeoutError(
+        `${provider} did not answer before the caller's signal timed out.`,
+        {
+          cause,
+          provider,
+        },
+      )
+    : new APIUserAbortError("Request was aborted.", { cause, provider });
+}
+
+/** The error for a caller's signal that has fired. */
+function callerEnded(caller: AbortSignal, provider: string): OgError {
+  return ended({
+    signal: caller,
+    caller,
+    timer: undefined,
+    timeout: Infinity,
+    provider,
+  }) as OgError;
+}
+
+/**
+ * Resolves after `ms`, or rejects as soon as `signal` fires.
+ * The wait is a real timer, since a timeout signal alone does not keep a process alive until it fires.
+ */
+export function sleep(ms: number, signal?: AbortSignal, provider = "og"): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(callerEnded(signal, provider));
+      return;
+    }
+    const stop = (): void => {
+      clearTimeout(timer);
+      reject(callerEnded(signal as AbortSignal, provider));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", stop, { once: true });
   });
+}
+
+/**
+ * Reads a response's body. A read its request's signals end fails as the request itself would,
+ * with a timeout or an abort, and not with whatever the runtime throws.
+ */
+export async function readBody<T>(
+  response: Response,
+  read: (response: Response) => Promise<T>,
+): Promise<T> {
+  try {
+    return await read(response);
+  } catch (thrown) {
+    const watched = watches.get(response);
+    throw (watched && ended(watched, thrown)) ?? thrown;
+  }
+}
 
 /** Delay before retry `attempt` (0-based): the server's `retry-after` if sane, else exponential backoff with jitter. */
 export function retryDelay(attempt: number, headers: Headers | undefined): number {
@@ -101,73 +228,103 @@ export function retryDelay(attempt: number, headers: Headers | undefined): numbe
 
 export class Transport {
   readonly #options: TransportOptions;
+  readonly #name: string;
 
   constructor(options: TransportOptions) {
     this.#options = options;
+    this.#name = options.name ?? "og";
+  }
+
+  /** The provider's request ID from a response, if it sent one. */
+  requestId(headers: Headers): string | undefined {
+    for (const name of this.#options.requestIdHeaders ?? ["x-request-id"]) {
+      const value = headers.get(name);
+      if (value) return value;
+    }
+    return undefined;
   }
 
   log(level: Exclude<LogLevel, "off">, message: string, ...rest: unknown[]): void {
     if (LEVELS[level] <= LEVELS[this.#options.logLevel])
-      this.#options.logger[level](`[og] ${message}`, ...rest);
+      this.#options.logger[level](`[${this.#name}] ${message}`, ...rest);
   }
 
   /** Sends a call, retrying where safe, and returns the successful `Response`. */
   async send(call: Call): Promise<Response> {
     const { options } = call;
-    const url = `${this.#options.baseUrl}${call.path}${toSearch(call.query)}`;
+    const base = /^https?:\/\//.test(call.path) ? "" : this.#options.baseUrl;
+    const url = `${base}${call.path}${toSearch(call.query)}`;
+    const provider = this.#name;
     const maxRetries = call.idempotent ? (options?.maxRetries ?? this.#options.maxRetries) : 0;
     const timeout = options?.timeout ?? this.#options.timeout;
+    const caller = options?.signal;
     for (let attempt = 0; ; attempt++) {
-      if (options?.signal?.aborted) throw new APIUserAbortError("Request was aborted.");
-      const timer = AbortSignal.timeout(timeout);
-      const signal = options?.signal ? AbortSignal.any([options.signal, timer]) : timer;
-      this.log("debug", `${call.method} ${url}`, attempt > 0 ? { attempt } : "");
+      // A retry never starts after the caller has given up.
+      if (caller?.aborted) throw callerEnded(caller, provider);
+      const watched = watch(caller, timeout, provider);
+      this.log("debug", `${call.method} request`, { attempt: attempt + 1 });
       let response: Response;
       try {
         response = await this.#options.fetch(url, {
           method: call.method,
           headers: {
             accept: "application/json",
-            ...this.#options.headers,
+            ...(call.bare ? {} : this.#options.headers),
             ...call.headers,
-            ...options?.headers,
+            ...(call.bare ? {} : options?.headers),
           },
           ...(call.body === undefined ? {} : { body: call.body }),
-          signal,
+          ...(watched.signal === undefined ? {} : { signal: watched.signal }),
         });
       } catch (cause) {
-        if (options?.signal?.aborted)
-          throw new APIUserAbortError("Request was aborted.", { cause });
-        const error = timer.aborted
-          ? new APIConnectionTimeoutError(`og did not answer within ${timeout} ms.`, { cause })
-          : new APIConnectionError("Could not reach og.", { cause });
+        const error =
+          ended(watched, cause) ??
+          new APIConnectionError(`Could not reach ${provider}.`, { cause, provider });
+        // Only the transport's own timeout is worth another try. The caller's signal ends the call.
+        const own = watched.timer?.aborted === true && !caller?.aborted;
+        if (caller?.aborted || (error instanceof APIConnectionTimeoutError && !own)) throw error;
         if (attempt < maxRetries) {
           const wait = retryDelay(attempt, undefined);
           this.log("info", `${error.message} Retrying in ${Math.round(wait)} ms.`);
-          await sleep(wait, options?.signal);
+          await sleep(wait, caller, provider);
           continue;
         }
         throw error;
       }
+      watches.set(response, watched);
       if (response.ok) return response;
-      const retryable = RETRY_STATUSES.has(response.status) || response.status >= 500;
+      // A 501 says the server lacks the endpoint, which no second attempt changes.
+      const retryable =
+        RETRY_STATUSES.has(response.status) || (response.status >= 500 && response.status !== 501);
       if (retryable && attempt < maxRetries) {
         const wait = retryDelay(attempt, response.headers);
-        this.log("info", `og answered ${response.status}. Retrying in ${Math.round(wait)} ms.`);
+        this.log(
+          "info",
+          `${provider} answered ${response.status}. Retrying in ${Math.round(wait)} ms.`,
+        );
         await response.body?.cancel();
-        await sleep(wait, options?.signal);
+        await sleep(wait, caller, provider);
         continue;
       }
-      let problem: Problem | undefined;
+      let body: unknown;
+      const text = await readBody(response, (answer) => answer.text()).catch((failure: unknown) => {
+        // A body the signals cut short is a timeout or an abort, not an error answer with no body.
+        if (failure instanceof OgError) throw failure;
+        return "";
+      });
       try {
-        problem = (await response.json()) as Problem;
+        body = JSON.parse(text);
       } catch {
-        problem = undefined;
+        body = text === "" ? undefined : text;
       }
-      const error = OgError.fromResponse(response.status, problem, response.headers);
+      const error = OgError.fromResponse(response.status, body, response.headers, {
+        provider,
+        message: this.#options.describeError?.(body, response.status),
+        requestId: this.requestId(response.headers),
+      });
       this.log(
         response.status >= 500 ? "error" : "warn",
-        `${call.method} ${call.path}: ${error.message}`,
+        `${call.method} request failed (HTTP ${response.status}).`,
       );
       throw error;
     }
@@ -175,71 +332,29 @@ export class Transport {
 }
 
 /**
- * The promise every client method returns. Await it for the parsed data, or call
- * `withResponse()` for the data with the raw `Response`, or `asResponse()` for the
- * raw `Response` with its body unread.
+ * The promise every client method returns.
+ * Await it for the parsed data, or call `withResponse()` for the data with the raw `Response`,
+ * the request ID, the server that answered and how long the answer may be kept.
  */
 export class APIPromise<T> extends Promise<T> {
-  readonly #response: Promise<Response>;
-  readonly #parse: (response: Response) => Promise<T>;
-  #parsed: Promise<WithResponse<T>> | undefined;
+  readonly #outcome: Promise<Outcome<T>>;
 
-  constructor(response: Promise<Response>, parse: (response: Response) => Promise<T>) {
-    super((resolve) => resolve(undefined as T));
-    this.#response = response;
-    this.#parse = parse;
-    // Rejections surface through then(), withResponse() or asResponse(), never as unhandled.
-    response.catch(() => {});
+  constructor(outcome: Promise<Outcome<T>>) {
+    super((resolve, reject) => {
+      outcome.then((settled) => resolve(settled.data), reject);
+    });
+    this.#outcome = outcome;
+    // A caller may read only one of the two, so neither rejects unhandled.
+    outcome.catch(() => {});
+    this.catch(() => {});
   }
 
   static override get [Symbol.species](): PromiseConstructor {
     return Promise;
   }
 
-  /** The raw `Response`, body unread. */
-  asResponse(): Promise<Response> {
-    return this.#response;
+  /** The parsed data with the raw `Response`, whose body is already read. */
+  withResponse(): Promise<Outcome<T>> {
+    return this.#outcome;
   }
-
-  /** The parsed data, the raw `Response` and og's request ID. */
-  withResponse(): Promise<WithResponse<T>> {
-    this.#parsed ??= this.#response.then(async (response) => ({
-      data: await this.#parse(response),
-      response,
-      requestId: response.headers.get("x-request-id") ?? undefined,
-    }));
-    return this.#parsed;
-  }
-
-  // APIPromise is a Promise, so it must define then().
-  // oxlint-disable-next-line unicorn/no-thenable
-  override then<A = T, B = never>(
-    onfulfilled?: ((value: T) => A | PromiseLike<A>) | null,
-    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
-  ): Promise<A | B> {
-    return this.withResponse()
-      .then((result) => result.data)
-      .then(onfulfilled, onrejected);
-  }
-
-  override catch<B = never>(
-    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
-  ): Promise<T | B> {
-    return this.then(undefined, onrejected);
-  }
-
-  override finally(onfinally?: (() => void) | null): Promise<T> {
-    return this.then().finally(onfinally);
-  }
-}
-
-/** Adds og's request ID to a parsed object as `_request_id`, not enumerable. */
-export function withRequestId<T>(data: T, response: Response): T {
-  if (data !== null && typeof data === "object") {
-    Object.defineProperty(data, "_request_id", {
-      value: response.headers.get("x-request-id") ?? undefined,
-      enumerable: false,
-    });
-  }
-  return data;
 }

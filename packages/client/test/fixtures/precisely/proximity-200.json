@@ -1,0 +1,23 @@
+{
+  "response": {
+    "addressId": "1",
+    "status": "OK",
+    "results": [
+      {
+        "distance": 0.0021,
+        "location": { "latitude": 44.52311, "longitude": -89.57409 },
+        "metadata": {
+          "PBKEY": "P0000QX7H2LM",
+          "COUNTRY": "USA",
+          "FORMATTEDADDRESS": "612 LARK ST HARROWMERE WI 54481-2207",
+          "ADDNUMBER": "612",
+          "STREETNAME": "LARK ST",
+          "CITY": "HARROWMERE",
+          "ADMIN1": "WI",
+          "POSTALCODE": "54481",
+          "POSTALCODEEXT": "2207"
+        }
+      }
+    ]
+  }
+}

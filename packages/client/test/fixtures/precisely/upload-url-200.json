@@ -1,0 +1,5 @@
+{
+  "fileId": "3c6e1a47-9d52-4b08-a7f3-61e0c5d2b894",
+  "url": "https://storage.example.com/bulk/ops%40example.com/input/harbour_batch%3A%3A3c6e1a47-9d52-4b08-a7f3-61e0c5d2b894%0A?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260304T075912Z&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Expires=600&X-Amz-Credential=FAKEACCESSKEY0000002%2F20260304%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=ffeeddccbbaa99887766554433221100f0e1d2c3b4a5968778695a4b3c2d1e0f",
+  "message": "The upload link stays valid for 10 minutes."
+}

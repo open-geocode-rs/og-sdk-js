@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [
+          -89.63127485206913,
+          43.41856203917482
+        ],
+        "type": "Point"
+      },
+      "properties": {
+        "name": "Calloway Lantern Museum",
+        "mapbox_id": "dXJuOm1ieHBvaTo2YTQwZDJmOS1iODcxLTRlM2MtOGQwNS1jMmY3OTEzYWU2YjA",
+        "feature_type": "poi",
+        "address": "58 Foundry Passage",
+        "full_address": "58 Foundry Passage, Dunster Falls, Wisconsin 53962, United States",
+        "place_formatted": "Dunster Falls, Wisconsin 53962, United States",
+        "context": {
+          "country": {
+            "id": "",
+            "name": "United States",
+            "country_code": "US",
+            "country_code_alpha_3": "USA"
+          },
+          "region": {
+            "id": "",
+            "name": "Wisconsin",
+            "region_code": "WI",
+            "region_code_full": "US-WI"
+          },
+          "postcode": {
+            "id": "dXJuOm1ieHBsYzpQekRmMkE",
+            "name": "53962"
+          },
+          "place": {
+            "id": "dXJuOm1ieHBsYzpEc0ZsOFE",
+            "name": "Dunster Falls"
+          },
+          "neighborhood": {
+            "id": "dXJuOm1ieHBsYzpHd0tzNHc",
+            "name": "Glassworks"
+          },
+          "address": {
+            "id": "",
+            "name": "58 Foundry Passage, Dunster Falls, Wisconsin 53962, United States",
+            "address_number": "58",
+            "street_name": "foundry passage"
+          },
+          "street": {
+            "id": "",
+            "name": "foundry passage"
+          }
+        },
+        "coordinates": {
+          "latitude": 43.41856203917482,
+          "longitude": -89.63127485206913,
+          "routable_points": [
+            {
+              "name": "POI",
+              "latitude": 43.418497160285,
+              "longitude": -89.63204917356283
+            }
+          ]
+        },
+        "language": "en",
+        "maki": "museum",
+        "poi_category": [
+          "museum",
+          "tourist attraction"
+        ],
+        "poi_category_ids": [
+          "museum",
+          "tourist_attraction"
+        ],
+        "external_ids": {},
+        "metadata": {
+          "phone": "+1 608 555 0142",
+          "website": "https://lantern-museum.example",
+          "rating": 4.37,
+          "wheelchair_accessible": true,
+          "popularity": 0.826
+        },
+        "operational_status": "active"
+      }
+    }
+  ],
+  "attribution": "© 2026 Mapbox and its suppliers. This is a synthetic test response in the documented shape. (https://www.mapbox.com/about/maps/)"
+}

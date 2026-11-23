@@ -1,0 +1,167 @@
+{
+  "batch": [
+    {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "id": "dXJuOm1ieGFkcjo1OGUxYjdmNC05ZDAyLTRhNmMtYjNlOC0yYzcxZjBhNWQ5NDY",
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -78.31427,
+              44.61853
+            ]
+          },
+          "properties": {
+            "mapbox_id": "dXJuOm1ieGFkcjo1OGUxYjdmNC05ZDAyLTRhNmMtYjNlOC0yYzcxZjBhNWQ5NDY",
+            "feature_type": "address",
+            "name": "305 Heronsgate Avenue East",
+            "coordinates": {
+              "longitude": -78.31427,
+              "latitude": 44.61853,
+              "accuracy": "rooftop"
+            },
+            "place_formatted": "Brackenholt, Ontario K7R 2M4, Canada",
+            "match_code": {
+              "address_number": "matched",
+              "street": "matched",
+              "postcode": "matched",
+              "place": "matched",
+              "region": "matched",
+              "locality": "not_applicable",
+              "country": "inferred",
+              "confidence": "exact"
+            },
+            "context": {
+              "address": {
+                "mapbox_id": "dXJuOm1ieGFkcjo1OGUxYjdmNC05ZDAyLTRhNmMtYjNlOC0yYzcxZjBhNWQ5NDY",
+                "address_number": "305",
+                "street_name": "Heronsgate Avenue East",
+                "name": "305 Heronsgate Avenue East"
+              },
+              "street": {
+                "mapbox_id": "dXJuOm1ieGFkcjo1OGUxYjdmNC05ZDAyLTRhNmMtYjNlOC0yYzcxZjBhNWQ5NDY",
+                "name": "Heronsgate Avenue East"
+              },
+              "neighborhood": {
+                "mapbox_id": "dXJuOm1ieHBsYzpXclNkNUE",
+                "name": "Weirside",
+                "alternate": {
+                  "mapbox_id": "dXJuOm1ieHBsYzpDcE1rMlE",
+                  "name": "Coppermarket Square"
+                }
+              },
+              "postcode": {
+                "mapbox_id": "dXJuOm1ieHBsYzpQekJrOUE",
+                "name": "K7R 2M4"
+              },
+              "place": {
+                "mapbox_id": "dXJuOm1ieHBsYzpCa0h0N3c",
+                "name": "Brackenholt",
+                "wikidata_id": "Q952394872"
+              },
+              "region": {
+                "mapbox_id": "dXJuOm1ieHBsYzpPblRy",
+                "name": "Ontario",
+                "wikidata_id": "Q963405983",
+                "region_code": "ON",
+                "region_code_full": "CA-ON"
+              },
+              "country": {
+                "mapbox_id": "dXJuOm1ieHBsYzpDbjI",
+                "name": "Canada",
+                "wikidata_id": "Q974516094",
+                "country_code": "CA",
+                "country_code_alpha_3": "CAN"
+              }
+            }
+          }
+        }
+      ],
+      "attribution": "NOTICE: © 2025 Mapbox and its suppliers. This is a synthetic test response in the documented shape. The terms for real data are published by Mapbox (https://www.mapbox.com/about/maps/). Nothing in this response describes a real place."
+    },
+    {
+      "type": "FeatureCollection",
+      "features": [],
+      "attribution": "NOTICE: © 2025 Mapbox and its suppliers. This is a synthetic test response in the documented shape. The terms for real data are published by Mapbox (https://www.mapbox.com/about/maps/). Nothing in this response describes a real place."
+    },
+    {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "id": "dXJuOm1ieGFkcjowZDk2YTNjOC1mNTE3LTQyYmUtOGE0MC1lNmI5MjczYzE1ZmQ",
+          "geometry": {
+            "type": "Point",
+            "coordinates": [
+              -72.6418273,
+              44.3127465
+            ]
+          },
+          "properties": {
+            "mapbox_id": "dXJuOm1ieGFkcjowZDk2YTNjOC1mNTE3LTQyYmUtOGE0MC1lNmI5MjczYzE1ZmQ",
+            "feature_type": "address",
+            "name": "27 Orchard Wynd",
+            "coordinates": {
+              "longitude": -72.6418273,
+              "latitude": 44.3127465,
+              "accuracy": "rooftop"
+            },
+            "place_formatted": "Thistlecombe, Vermont 05873, United States",
+            "context": {
+              "address": {
+                "mapbox_id": "dXJuOm1ieGFkcjowZDk2YTNjOC1mNTE3LTQyYmUtOGE0MC1lNmI5MjczYzE1ZmQ",
+                "address_number": "27",
+                "street_name": "Orchard Wynd",
+                "name": "27 Orchard Wynd"
+              },
+              "street": {
+                "mapbox_id": "dXJuOm1ieGFkcjowZDk2YTNjOC1mNTE3LTQyYmUtOGE0MC1lNmI5MjczYzE1ZmQ",
+                "name": "Orchard Wynd"
+              },
+              "neighborhood": {
+                "mapbox_id": "dXJuOm1ieHBsYzpDZFdrNlE",
+                "name": "Candlewick"
+              },
+              "postcode": {
+                "mapbox_id": "dXJuOm1ieHBsYzpQelRjM0E",
+                "name": "05873"
+              },
+              "locality": {
+                "mapbox_id": "dXJuOm1ieHBsYzpMd1BsOGc",
+                "name": "Lower Pell",
+                "wikidata_id": "Q985627105"
+              },
+              "place": {
+                "mapbox_id": "dXJuOm1ieHBsYzpUc0NiNHc",
+                "name": "Thistlecombe",
+                "wikidata_id": "Q996738216"
+              },
+              "district": {
+                "mapbox_id": "dXJuOm1ieHBsYzpBc0d2MVE",
+                "name": "Ashgrove County",
+                "wikidata_id": "Q907849327"
+              },
+              "region": {
+                "mapbox_id": "dXJuOm1ieHBsYzpWbU50",
+                "name": "Vermont",
+                "wikidata_id": "Q918950438",
+                "region_code": "VT",
+                "region_code_full": "US-VT"
+              },
+              "country": {
+                "mapbox_id": "dXJuOm1ieHBsYzpRbTQ",
+                "name": "United States",
+                "wikidata_id": "Q940117302",
+                "country_code": "US",
+                "country_code_alpha_3": "USA"
+              }
+            }
+          }
+        }
+      ],
+      "attribution": "NOTICE: © 2025 Mapbox and its suppliers. This is a synthetic test response in the documented shape. The terms for real data are published by Mapbox (https://www.mapbox.com/about/maps/). Nothing in this response describes a real place."
+    }
+  ]
+}

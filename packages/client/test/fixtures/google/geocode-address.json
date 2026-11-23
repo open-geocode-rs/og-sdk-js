@@ -1,0 +1,113 @@
+{
+  "results": [
+    {
+      "place": "//places.googleapis.com/places/ChIJxQvW8wK6j4AR3ukttGy3w2s",
+      "placeId": "ChIJxQvW8wK6j4AR3ukttGy3w2s",
+      "location": {
+        "latitude": 37.4224119,
+        "longitude": -122.08550779999999
+      },
+      "granularity": "ROOFTOP",
+      "viewport": {
+        "low": {
+          "latitude": 37.420886519708496,
+          "longitude": -122.08713963029149
+        },
+        "high": {
+          "latitude": 37.423584480291495,
+          "longitude": -122.0844416697085
+        }
+      },
+      "formattedAddress": "Google Building 41, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA",
+      "postalAddress": {
+        "regionCode": "US",
+        "languageCode": "en",
+        "postalCode": "94043-1351",
+        "administrativeArea": "CA",
+        "locality": "Mountain View",
+        "addressLines": [
+          "1600 Amphitheatre Pkwy"
+        ]
+      },
+      "addressComponents": [
+        {
+          "longText": "Google Building 41",
+          "shortText": "Google Building 41",
+          "types": [
+            "premise"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "1600",
+          "shortText": "1600",
+          "types": [
+            "street_number"
+          ]
+        },
+        {
+          "longText": "Amphitheatre Parkway",
+          "shortText": "Amphitheatre Pkwy",
+          "types": [
+            "route"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "Mountain View",
+          "shortText": "Mountain View",
+          "types": [
+            "locality",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "Santa Clara County",
+          "shortText": "Santa Clara County",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "California",
+          "shortText": "CA",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "United States",
+          "shortText": "US",
+          "types": [
+            "country",
+            "political"
+          ],
+          "languageCode": "en"
+        },
+        {
+          "longText": "94043",
+          "shortText": "94043",
+          "types": [
+            "postal_code"
+          ]
+        },
+        {
+          "longText": "1351",
+          "shortText": "1351",
+          "types": [
+            "postal_code_suffix"
+          ]
+        }
+      ],
+      "types": [
+        "premise",
+        "street_address"
+      ]
+    }
+  ]
+}

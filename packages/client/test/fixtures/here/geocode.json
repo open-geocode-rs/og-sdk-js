@@ -1,0 +1,51 @@
+{
+  "items": [
+    {
+      "title": "17 Quillfield Lane, Harrowmere VIC 3999, Australia",
+      "id": "here:af:streetsection:Kq3.wZ8dTnR5uYhM2xLbVe:CgcIBCDq4rYxEAEaAjE3KGQ",
+      "resultType": "houseNumber",
+      "houseNumberType": "PA",
+      "address": {
+        "label": "17 Quillfield Lane, Harrowmere VIC 3999, Australia",
+        "countryCode": "AUS",
+        "countryName": "Australia",
+        "stateCode": "VIC",
+        "state": "Victoria",
+        "county": "Marrowby",
+        "city": "Harrowmere",
+        "district": "Tannery Hill",
+        "street": "Quillfield Lane",
+        "postalCode": "3999",
+        "houseNumber": "17"
+      },
+      "position": {
+        "lat": -37.48216,
+        "lng": 144.90537
+      },
+      "access": [
+        {
+          "lat": -37.48209,
+          "lng": 144.90544
+        }
+      ],
+      "mapView": {
+        "west": 144.90412,
+        "south": -37.48306,
+        "east": 144.90662,
+        "north": -37.48126
+      },
+      "scoring": {
+        "queryScore": 0.94,
+        "fieldScore": {
+          "country": 1,
+          "city": 1,
+          "streets": [
+            1
+          ],
+          "houseNumber": 1,
+          "postalCode": 0.78
+        }
+      }
+    }
+  ]
+}

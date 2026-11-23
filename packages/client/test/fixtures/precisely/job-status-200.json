@@ -1,0 +1,5 @@
+{
+  "status": "COMPLETED",
+  "downloadUrl": "https://storage.example.com/bulk/ops%40example.com/output/49d0c7b2-e815-4f6a-a3d1-5b72e90c48f6/harbour_batch%3A%3Aa41f7d90-2e63-4c15-b8a6-0d93e7f1c256.csv?X-Amz-Security-Token=FAKEtokenFAKEtokenFAKEtoken%2FnotARealCredential%2B0000%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260304T081530Z&X-Amz-SignedHeaders=host&X-Amz-Expires=600&X-Amz-Credential=FAKEACCESSKEY0000001%2F20260304%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=0f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff0",
+  "message": "The download link stays valid for 10 minutes."
+}

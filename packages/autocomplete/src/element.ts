@@ -1,25 +1,20 @@
-import { createAutocomplete, type Autocomplete, type State } from "@open-geocode/autocomplete-core";
 import {
-  createClient,
-  type AutocompleteParams,
-  type Client,
-  type ForwardCollection,
-} from "@open-geocode/client";
+  createAutocomplete,
+  ogSource,
+  type Autocomplete,
+  type Source,
+  type State,
+  type Suggestion,
+} from "@open-geocode/autocomplete-core";
+import { type AutocompleteParams, createClient } from "@open-geocode/client";
 
-/** One suggestion, as og returns it. */
-export type Suggestion = ForwardCollection["features"][number];
+export type { Suggestion };
 
-/** Fired when the user picks a suggestion. `detail` is the suggestion. */
+/** Fired when the user picks a suggestion. `detail` is the suggestion, with its coordinates. */
 export type OgSelectEvent = CustomEvent<Suggestion>;
 
-/** A `getItems` for `@open-geocode/autocomplete-core` that asks og's `/autocomplete`. */
-export function ogItems(
-  client: Client,
-  params: Omit<AutocompleteParams, "q"> = {},
-): (query: string, context: { signal: AbortSignal }) => Promise<Suggestion[]> {
-  return async (q, { signal }) =>
-    (await client.autocomplete({ ...params, q }, { signal })).features;
-}
+/** The parameters the element sends to og with every keystroke, built from its attributes. */
+export type SuggestParams = Omit<AutocompleteParams, "q">;
 
 const STYLE = `
 :host { display: block; position: relative; font: inherit; }
@@ -32,12 +27,19 @@ li[aria-selected="true"] { background: Highlight; color: HighlightText; }
 `;
 
 /**
- * `<og-autocomplete>`: an input that suggests addresses and places from og as the user types.
+ * `<og-autocomplete>` is an input that suggests addresses and places as the user types.
  * Built on `@open-geocode/autocomplete-core`, which owns the state, keyboard and ARIA.
  *
- * Attributes: `base-url` (required), `placeholder`, `limit`, `country`, `layer`, `focus`,
- * `debounce` (ms, default 150), `min-chars` (default 2), `name` (form field name).
- * Fires `og-select` with the chosen suggestion, and `og-error` when og fails.
+ * It asks the og server at `base-url`, or whatever its `source` property is set to,
+ * which is how it works with a vendor client.
+ *
+ * Its attributes are `base-url`, `placeholder`, `debounce` (ms, default 150), `min-chars` (default 2)
+ * and `name` (form field name).
+ * The attributes `limit`, `country` (comma-separated ISO codes), `layer`, `focus` (`lon,lat`),
+ * `bbox` and `lang` go to og with every keystroke, as og's own parameters.
+ * A source of your own carries its own parameters, so they do not apply to it.
+ * Fires `og-select` with the chosen suggestion, and `og-error` when the server fails.
+ * An API that suggests without coordinates is asked for them when the user picks.
  * Inside a `<form>`, its value is the chosen label.
  * Style it from outside with `::part(input)`, `::part(list)` and `::part(option)`.
  * While a search is slow, the host gets a `stalled` attribute for a spinner.
@@ -49,13 +51,20 @@ export class OgAutocomplete extends HTMLElement {
     "base-url",
     "debounce",
     "min-chars",
+    "limit",
+    "country",
+    "layer",
+    "focus",
+    "bbox",
+    "lang",
   ];
 
   readonly #internals: ElementInternals;
   readonly #input: HTMLInputElement;
   readonly #list: HTMLUListElement;
   #core: Autocomplete<Suggestion> | undefined;
-  #client: Client | undefined;
+  #given: Source<Suggestion> | undefined;
+  #source: Source<Suggestion> | undefined;
   #painted: Suggestion[] | undefined;
 
   constructor() {
@@ -86,13 +95,28 @@ export class OgAutocomplete extends HTMLElement {
 
   attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
     if (name === "placeholder") this.#input.placeholder = value ?? "";
-    else {
-      // Rebuild with the new settings on the next keystroke.
-      if (name === "base-url") this.#client = undefined;
-      this.#core?.destroy();
-      this.#core = undefined;
-      this.#paint(this.#ensureCore().getState());
-    }
+    else this.#rebuild();
+  }
+
+  /**
+   * Where suggestions come from. Set it to a source from `@open-geocode/autocomplete-core`,
+   * such as `mapboxSource(client)`, to use a vendor client.
+   * When unset, the element asks the og server at `base-url`.
+   */
+  get source(): Source<Suggestion> | undefined {
+    return this.#given;
+  }
+
+  set source(source: Source<Suggestion> | undefined) {
+    this.#given = source;
+    this.#rebuild();
+  }
+
+  /** Rebuilds with the new settings, so the next keystroke uses them. */
+  #rebuild(): void {
+    this.#core?.destroy();
+    this.#core = undefined;
+    this.#paint(this.#ensureCore().getState());
   }
 
   disconnectedCallback(): void {
@@ -115,26 +139,31 @@ export class OgAutocomplete extends HTMLElement {
     return this.hasAttribute(name) && Number.isFinite(value) ? value : fallback;
   }
 
+  #params(): SuggestParams {
+    const params: SuggestParams = { limit: this.#number("limit", 5) };
+    for (const name of ["country", "layer", "focus", "bbox", "lang"] as const) {
+      // A list written with spaces after its commas is still one og reads.
+      const value = this.getAttribute(name)?.replace(/\s+/g, "");
+      if (value)
+        (params as Record<string, string>)[name] = name === "country" ? value.toUpperCase() : value;
+    }
+    return params;
+  }
+
   #ensureCore(): Autocomplete<Suggestion> {
     if (this.#core) return this.#core;
-    const params: Omit<AutocompleteParams, "q"> = { limit: this.#number("limit", 5) };
-    for (const name of ["country", "layer", "focus"] as const) {
-      const value = this.getAttribute(name);
-      if (value) Object.assign(params, { [name]: value });
-    }
     const baseUrl = this.getAttribute("base-url");
-    if (baseUrl) this.#client ??= createClient({ baseUrl });
-    const client = this.#client;
-    this.#core = createAutocomplete<Suggestion>({
-      getItems: client ? ogItems(client, params) : async () => [],
-      getItemLabel: (item) => item.properties.label,
+    const source: Source<Suggestion> | undefined =
+      this.#given ?? (baseUrl ? ogSource(createClient({ baseUrl }), this.#params()) : undefined);
+    this.#source = source;
+    const core = createAutocomplete<Suggestion>({
+      getItems: source ? source.getItems : async () => [],
+      getItemLabel: (item) => item.label,
       debounce: this.#number("debounce", 150),
       minLength: this.#number("min-chars", 2),
       onSelect: (item) => {
-        this.value = item.properties.label;
-        this.dispatchEvent(
-          new CustomEvent("og-select", { detail: item, bubbles: true, composed: true }),
-        );
+        this.value = item.label;
+        void this.#select(item, source);
       },
       onStateChange: (state) => {
         this.#paint(state);
@@ -142,7 +171,22 @@ export class OgAutocomplete extends HTMLElement {
           this.dispatchEvent(new CustomEvent("og-error", { detail: state.error }));
       },
     });
-    return this.#core;
+    this.#core = core;
+    return core;
+  }
+
+  /** Fires `og-select`, after fetching the coordinates of a suggestion that came without them. */
+  async #select(item: Suggestion, source: Source<Suggestion> | undefined): Promise<void> {
+    let detail = item;
+    try {
+      if (source) detail = await source.resolve(item);
+    } catch (error) {
+      this.dispatchEvent(new CustomEvent("og-error", { detail: error }));
+      return;
+    }
+    // A newer source or setting replaced this one while the lookup ran.
+    if (source !== this.#source) return;
+    this.dispatchEvent(new CustomEvent("og-select", { detail, bubbles: true, composed: true }));
   }
 
   #paint(state: State<Suggestion>): void {
@@ -162,7 +206,7 @@ export class OgAutocomplete extends HTMLElement {
           const li = document.createElement("li");
           li.setAttribute("part", "option");
           li.dataset["index"] = String(index);
-          li.textContent = item.properties.label;
+          li.textContent = item.label;
           return li;
         }),
       );

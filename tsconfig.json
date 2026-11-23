@@ -3,8 +3,13 @@
   "compilerOptions": {
     "paths": {
       "@open-geocode/client": ["./packages/client/src/index.ts"],
+      "@open-geocode/client/google": ["./packages/client/src/providers/google/index.ts"],
+      "@open-geocode/client/mapbox": ["./packages/client/src/providers/mapbox/index.ts"],
+      "@open-geocode/client/here": ["./packages/client/src/providers/here/index.ts"],
+      "@open-geocode/client/precisely": ["./packages/client/src/providers/precisely/index.ts"],
+      "@open-geocode/client/plugins": ["./packages/client/src/plugins/index.ts"],
       "@open-geocode/autocomplete-core": ["./packages/autocomplete-core/src/index.ts"]
     }
   },
-  "include": ["packages/*/src", "packages/*/test"]
+  "include": ["packages/*/src", "packages/*/test", "packages/*/scripts"]
 }

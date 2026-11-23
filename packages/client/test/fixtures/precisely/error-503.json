@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "status": "SERVICE_UNAVAILABLE",
+      "errorMessage": "The service is not available at the moment (DIS-LI-1011)"
+    }
+  ]
+}

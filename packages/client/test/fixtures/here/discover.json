@@ -1,0 +1,92 @@
+{
+  "items": [
+    {
+      "title": "Larkwhistle Bakehouse",
+      "id": "here:pds:place:8409rb7w-5d0e3a9c71f244b8a2c6e84f1b37d059",
+      "ontologyId": "here:cm:ontology:bakery",
+      "resultType": "place",
+      "address": {
+        "label": "Larkwhistle Bakehouse, 38 Tannery Row, Quillfield, OR 97999-3120, United States",
+        "countryCode": "USA",
+        "countryName": "United States",
+        "stateCode": "OR",
+        "state": "Oregon",
+        "county": "Brindlemoor",
+        "city": "Quillfield",
+        "district": "Old Wharf",
+        "street": "Tannery Row",
+        "postalCode": "97999-3120",
+        "houseNumber": "38"
+      },
+      "position": { "lat": 44.61382, "lng": -122.90417 },
+      "access": [{ "lat": 44.61375, "lng": -122.90428 }],
+      "distance": 15,
+      "categories": [
+        { "id": "600-6300-0244", "name": "Bakery & Baked Goods Store", "primary": true },
+        { "id": "100-1100-0010", "name": "Coffee Shop" },
+        { "id": "100-1100-0000", "name": "Coffee-Tea" },
+        { "id": "100-1000-0001", "name": "Casual Dining" },
+        { "id": "100-1000-0003", "name": "Take Out & Delivery Only" },
+        { "id": "600-6300-0245", "name": "Sweet Shop" },
+        { "id": "600-6900-0096", "name": "Specialty Store" }
+      ],
+      "references": [
+        { "supplier": { "id": "core" }, "id": "1408276539" },
+        { "supplier": { "id": "core" }, "id": "58340917" },
+        { "supplier": { "id": "ogsynth" }, "id": "6402815" },
+        { "supplier": { "id": "ogsynth" }, "id": "Hd4sW_p9XkTqe-2LnVb07A" },
+        { "supplier": { "id": "ogsynth" }, "id": "t8RmC3yJ-uFzG6aNQx1_Ew" }
+      ],
+      "foodTypes": [
+        { "id": "302-000", "name": "French", "primary": true },
+        { "id": "800-064", "name": "Sandwich" }],
+      "contacts": [
+        {
+          "phone": [
+            { "value": "+15415550137" },
+            {
+              "value": "+15415550162",
+              "categories": [{ "id": "100-1100-0010" }, { "id": "100-1100-0000" }, { "id": "100-1000-0001" }]
+            }
+          ],
+          "www": [
+            {
+              "value": "http://www.larkwhistle-bakehouse.example",
+              "categories": [
+                { "id": "100-1100-0010" }, { "id": "100-1100-0000" }, { "id": "100-1000-0001" },
+                { "id": "600-6300-0244" }, { "id": "600-6300-0245" }, { "id": "600-6900-0096" }
+              ]
+            }
+          ],
+          "email": [
+            {
+              "value": "hello@larkwhistle-bakehouse.example",
+              "categories": [{ "id": "100-1000-0003" }, { "id": "600-6300-0244" }]
+            }
+          ]
+        }
+      ],
+      "openingHours": [
+        {
+          "categories": [{ "id": "100-1100-0010" }],
+          "text": ["Tue-Sat: 07:00 - 15:00", "Mon: 08:30 - 13:00"],
+          "isOpen": true,
+          "structured": [
+            { "start": "T070000", "duration": "PT08H00M", "recurrence": "FREQ:DAILY;BYDAY:TU,WE,TH,FR,SA" },
+            { "start": "T083000", "duration": "PT04H30M", "recurrence": "FREQ:DAILY;BYDAY:MO" }
+          ]
+        },
+        {
+          "categories": [{ "id": "600-6300-0244" }],
+          "text": ["Tue-Thu: 06:30 - 17:00", "Fri: 06:30 - 18:30", "Sat, Sun: 07:30 - 13:00"],
+          "isOpen": true,
+          "structured": [
+            { "start": "T063000", "duration": "PT10H30M", "recurrence": "FREQ:DAILY;BYDAY:TU,WE,TH" },
+            { "start": "T063000", "duration": "PT12H00M", "recurrence": "FREQ:DAILY;BYDAY:FR" },
+            { "start": "T073000", "duration": "PT05H30M", "recurrence": "FREQ:DAILY;BYDAY:SA,SU" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "ecosystem-test-treeshake",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@open-geocode/autocomplete": "workspace:*",
+    "@open-geocode/client": "workspace:*"
+  }
+}

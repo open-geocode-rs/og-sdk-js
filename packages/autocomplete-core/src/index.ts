@@ -22,7 +22,7 @@ export interface State<Item> {
 
 /** Options for {@link createAutocomplete}. */
 export interface AutocompleteOptions<Item> {
-  /** Fetches items for a query. Abort work when `signal` fires: a newer query replaced it. */
+  /** Fetches items for a query. Abort work when `signal` fires, since a newer query replaced it. */
   getItems(query: string, context: { signal: AbortSignal }): Promise<Item[]>;
   /** Text shown for an item, and put in the input when it is picked. */
   getItemLabel(item: Item): string;
@@ -50,7 +50,7 @@ export interface Autocomplete<Item> {
   subscribe(listener: (state: State<Item>) => void): () => void;
   /** Call on every input event with the input's new value. */
   onInput(value: string): void;
-  /** Call on keydown with `event.key`. Returns `true` when handled: then call `event.preventDefault()`. */
+  /** Call on keydown with `event.key`. Returns `true` when handled, and then you call `event.preventDefault()`. */
   onKeyDown(key: string): boolean;
   /** Call when the input loses focus. */
   onBlur(): void;
@@ -214,3 +214,5 @@ export function createAutocomplete<Item>(options: AutocompleteOptions<Item>): Au
   };
   return autocomplete;
 }
+
+export * from "./sources.ts";
