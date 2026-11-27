@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # With changesets pending, opens or updates the "Version packages" pull request.
+      # With none, publishes every public package whose version is not on npm yet.
+      - uses: changesets/action@v2
+        with:
+          version-script: bun run changeset version
+          publish-script: bunx changeset publish
+          commit-message: "chore(release): version packages"
+          pr-title: Version packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
