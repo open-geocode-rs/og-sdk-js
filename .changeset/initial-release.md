@@ -1,5 +1,4 @@
 ---
-"@open-geocode/client": minor
 "@open-geocode/autocomplete": minor
 "@open-geocode/autocomplete-core": minor
 ---
