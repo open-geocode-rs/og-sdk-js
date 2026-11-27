@@ -10,14 +10,19 @@
     "places",
     "reverse-geocoding"
   ],
+  "homepage": "https://opengeocode.com/docs/guides/typescript/",
+  "bugs": "https://github.com/open-geocode-rs/og-sdk-js/issues",
   "license": "Apache-2.0",
+  "author": "Abhigyaan Jha and the open-geocode contributors",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/open-geocode-rs/og-sdk-js.git",
     "directory": "packages/client"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "type": "module",
   "sideEffects": false,
@@ -48,7 +53,14 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsdown"
+    "build": "tsdown",
+    "prepack": "node -e \"for (const f of ['LICENSE', 'NOTICE']) require('node:fs').copyFileSync('../../' + f, f)\""
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }
