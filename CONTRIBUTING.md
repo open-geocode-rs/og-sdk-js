@@ -33,3 +33,9 @@ The Google fixtures are the one exception, credited in `packages/client/test/fix
 
 og-sdk-js is licensed under the [Apache License 2.0](LICENSE).
 By opening a pull request, you agree that your contribution is licensed under it too.
+
+## Releases
+
+A merge to `main` with pending changesets opens or updates a "Version packages" pull request.
+Merging that pull request publishes the new versions to npm from the Release workflow, through npm trusted publishing.
+`@open-geocode/autocomplete` and `@open-geocode/autocomplete-core` are private, so they are never published or versioned until they drop `"private": true`.
