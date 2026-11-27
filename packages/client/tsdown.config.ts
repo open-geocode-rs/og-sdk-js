@@ -13,5 +13,8 @@ export default defineConfig({
   format: ["esm"],
   dts: true,
   platform: "neutral",
-  copy: ["../../LICENSE", "../../NOTICE"],
+  sourcemap: true,
+  // Stable names keep one release's files diffable against the last, and shared chunks apart from the entries.
+  hash: false,
+  outputOptions: { chunkFileNames: "shared/[name].js" },
 });
