@@ -1,6 +1,6 @@
 {
   "name": "@open-geocode/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The client for open-geocode, and clients that speak the Google, Mapbox, HERE and Precisely APIs against og or the vendor. Typed, tree-shakeable, no runtime dependencies.",
   "keywords": [
     "autocomplete",
